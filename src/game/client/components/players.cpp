@@ -924,7 +924,6 @@ void CPlayers::OnRender()
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 		return;
 
-	// update render info for ninja
 	CTeeRenderInfo aRenderInfo[MAX_CLIENTS];
 	const bool IsTeamPlay = GameClient()->IsTeamPlay();
 	for(int i = 0; i < MAX_CLIENTS; ++i)
@@ -932,7 +931,6 @@ void CPlayers::OnRender()
 		aRenderInfo[i] = GameClient()->m_aClients[i].m_RenderInfo;
 		aRenderInfo[i].m_TeeRenderFlags = 0;
 
-		// predict freeze skin only for local players
 		bool Frozen = false;
 		if(i == GameClient()->m_aLocalIds[0] || i == GameClient()->m_aLocalIds[1])
 		{
@@ -959,7 +957,6 @@ void CPlayers::OnRender()
 
 		if((GameClient()->m_aClients[i].m_RenderCur.m_Weapon == WEAPON_NINJA || (Frozen && !GameClient()->m_GameInfo.m_NoSkinChangeForFrozen)) && g_Config.m_ClShowNinja)
 		{
-			// change the skin for the player to the ninja
 			aRenderInfo[i].m_aSixup[g_Config.m_ClDummy].Reset();
 			aRenderInfo[i].ApplySkin(NinjaTeeRenderInfo()->TeeRenderInfo());
 			aRenderInfo[i].m_CustomColoredSkin = IsTeamPlay;
@@ -969,22 +966,32 @@ void CPlayers::OnRender()
 				aRenderInfo[i].m_ColorFeet = ColorRGBA(1, 1, 1);
 			}
 		}
+
+		ColorRGBA TargetColor = GameClient()->m_MyComponent.GetTargetColor(i, g_Config.m_ClDummy);
+		if(TargetColor.a > 0.0f)
+		{
+			aRenderInfo[i].m_CustomColoredSkin = true;
+			aRenderInfo[i].m_ColorBody = TargetColor;
+			aRenderInfo[i].m_ColorFeet = TargetColor;
+			for(auto &Sixup : aRenderInfo[i].m_aSixup)
+			{
+				std::fill(std::begin(Sixup.m_aUseCustomColors), std::end(Sixup.m_aUseCustomColors), true);
+				for(auto &PartColor : Sixup.m_aColors)
+				{
+					PartColor = TargetColor;
+				}
+			}
+		}
 	}
 
-	// get screen edges to avoid rendering offscreen
 	float ScreenX0, ScreenY0, ScreenX1, ScreenY1;
 	Graphics()->GetScreen(&ScreenX0, &ScreenY0, &ScreenX1, &ScreenY1);
-	// expand the edges to prevent popping in/out onscreen
-	//
-	// it is assumed that the tee, all its weapons, and emotes fit into a 200x200 box centered on the tee
-	// this may need to be changed or calculated differently in the future
 	float BorderBuffer = 100;
 	ScreenX0 -= BorderBuffer;
 	ScreenX1 += BorderBuffer;
 	ScreenY0 -= BorderBuffer;
 	ScreenY1 += BorderBuffer;
 
-	// render everyone else's hook, then our own
 	const int LocalClientId = GameClient()->m_Snap.m_LocalClientId;
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
@@ -1000,7 +1007,6 @@ void CPlayers::OnRender()
 		RenderHook(&pLocalClientData->m_RenderPrev, &pLocalClientData->m_RenderCur, &aRenderInfo[LocalClientId], LocalClientId);
 	}
 
-	// render spectating players
 	for(const auto &Client : GameClient()->m_aClients)
 	{
 		if(!Client.m_SpecCharPresent)
@@ -1010,14 +1016,13 @@ void CPlayers::OnRender()
 
 		const int ClientId = Client.ClientId();
 		float Alpha = (GameClient()->IsOtherTeam(ClientId) || ClientId < 0) ? g_Config.m_ClShowOthersAlpha / 100.f : 1.f;
-		if(ClientId == -2) // ghost
+		if(ClientId == -2)
 		{
 			Alpha = g_Config.m_ClRaceGhostAlpha / 100.f;
 		}
 		RenderTools()->RenderTee(CAnimState::GetIdle(), &SpectatorTeeRenderInfo()->TeeRenderInfo(), EMOTE_BLINK, vec2(1, 0), Client.m_SpecChar, Alpha);
 	}
 
-	// render everyone else's tee, then either our own or the tee we are spectating.
 	const int RenderLastId = (GameClient()->m_Snap.m_SpecInfo.m_SpectatorId != SPEC_FREEVIEW && GameClient()->m_Snap.m_SpecInfo.m_Active) ? GameClient()->m_Snap.m_SpecInfo.m_SpectatorId : LocalClientId;
 
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
@@ -1033,13 +1038,13 @@ void CPlayers::OnRender()
 		{
 			continue;
 		}
+
 		RenderPlayer(&GameClient()->m_aClients[ClientId].m_RenderPrev, &GameClient()->m_aClients[ClientId].m_RenderCur, &aRenderInfo[ClientId], ClientId);
 	}
 	if(RenderLastId != -1 && IsPlayerInfoAvailable(RenderLastId))
 	{
-		const CGameClient::CClientData *pClientData = &GameClient()->m_aClients[RenderLastId];
-		RenderHookCollLine(&pClientData->m_RenderPrev, &pClientData->m_RenderCur, RenderLastId);
-		RenderPlayer(&pClientData->m_RenderPrev, &pClientData->m_RenderCur, &aRenderInfo[RenderLastId], RenderLastId);
+		RenderHookCollLine(&GameClient()->m_aClients[RenderLastId].m_RenderPrev, &GameClient()->m_aClients[RenderLastId].m_RenderCur, RenderLastId);
+		RenderPlayer(&GameClient()->m_aClients[RenderLastId].m_RenderPrev, &GameClient()->m_aClients[RenderLastId].m_RenderCur, &aRenderInfo[RenderLastId], RenderLastId);
 	}
 }
 
