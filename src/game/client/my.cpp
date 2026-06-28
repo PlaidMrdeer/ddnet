@@ -93,13 +93,14 @@ void CMyComponent::OnUpdate()
 		}
 	}
 
+	m_SilentAimActive = false;
 	if(BestId != -1)
 	{
 		m_TargetId = BestId;
 		if(GameClient()->m_Controls.m_aInputData[g_Config.m_ClDummy].m_Hook)
 		{
-			GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy] = GameClient()->m_aClients[BestId].m_RenderPos - LocalPos;
-			GameClient()->m_Controls.m_aMouseInputType[g_Config.m_ClDummy] = CControls::EMouseInputType::ABSOLUTE;
+			m_SilentAimActive = true;
+			m_SilentAimVector = GameClient()->m_aClients[BestId].m_RenderPos - LocalPos;
 		}
 	}
 }
