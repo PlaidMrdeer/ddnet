@@ -100,12 +100,27 @@ void CMyComponent::OnUpdate()
 			vec2 LocalPos = GameClient()->m_aClients[LocalId].m_RenderPos;
 			vec2 Vel = GameClient()->m_aClients[LocalId].m_Predicted.m_Vel;
 
+			int InputDir = 0;
+			if(GameClient()->m_Controls.m_aInputDirectionLeft[DummyIdx] && !GameClient()->m_Controls.m_aInputDirectionRight[DummyIdx])
+				InputDir = -1;
+			else if(!GameClient()->m_Controls.m_aInputDirectionLeft[DummyIdx] && GameClient()->m_Controls.m_aInputDirectionRight[DummyIdx])
+				InputDir = 1;
+
+			if(InputDir != 0)
+			{
+				float MinSpeed = 4.0f;
+				if(InputDir == 1 && Vel.x < MinSpeed)
+					Vel.x = MinSpeed;
+				else if(InputDir == -1 && Vel.x > -MinSpeed)
+					Vel.x = -MinSpeed;
+			}
+
 			bool WillHitDanger = false;
 			vec2 AvoidDir = vec2(0.0f, 0.0f);
 
 			for(int ticks = 1; ticks <= 15; ++ticks)
 			{
-				vec2 PredPos = LocalPos + Vel * (ticks * 0.02f);
+				vec2 PredPos = LocalPos + Vel * (float)ticks;
 				int Index = Collision()->GetPureMapIndex(PredPos);
 				int Tile = Collision()->GetTileIndex(Index);
 				int FTile = Collision()->GetFrontTileIndex(Index);
