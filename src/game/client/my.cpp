@@ -4,11 +4,36 @@
 #include <engine/graphics.h>
 #include <base/math.h>
 #include <base/vmath.h>
+#include <cmath>
+#include <algorithm>
+
+void CMyComponent::OnReset()
+{
+	for(int i = 0; i < NUM_DUMMIES; i++)
+	{
+		m_aTargetId[i] = -1;
+		m_aAimState[i] = STATE_IDLE;
+		m_aCurrentAim[i] = vec2(0.0f, 0.0f);
+		m_aHookOverride[i] = false;
+	}
+}
+
+float CMyComponent::GetJitterAngle(int DummyIdx) const
+{
+	float Time = Client()->GlobalTime();
+	if(m_aAimState[DummyIdx] == STATE_AIMING_IN)
+	{
+		return std::sin(Time * 25.0f) * 0.025f + random_float(-0.01f, 0.01f);
+	}
+	else if(m_aAimState[DummyIdx] == STATE_HOOKING)
+	{
+		return std::sin(Time * 40.0f) * 0.012f + random_float(-0.005f, 0.005f);
+	}
+	return 0.0f;
+}
 
 void CMyComponent::OnUpdate()
 {
-	m_TargetId = -1;
-
 	if(Client()->State() != IClient::STATE_ONLINE && Client()->State() != IClient::STATE_DEMOPLAYBACK)
 	{
 		return;
@@ -25,15 +50,16 @@ void CMyComponent::OnUpdate()
 		return;
 	}
 
+	const int DummyIdx = g_Config.m_ClDummy;
 	vec2 LocalPos = GameClient()->m_aClients[LocalId].m_RenderPos;
-	vec2 AimDir = GameClient()->m_Controls.m_aMousePos[g_Config.m_ClDummy];
+	vec2 AimDir = GameClient()->m_Controls.m_aMousePos[DummyIdx];
 	if(length(AimDir) < 0.001f)
 	{
 		return;
 	}
 	AimDir = normalize(AimDir);
 
-	float HookLength = GameClient()->m_aTuning[g_Config.m_ClDummy].m_HookLength;
+	float HookLength = GameClient()->m_aTuning[DummyIdx].m_HookLength;
 	if(HookLength < 1.0f)
 	{
 		HookLength = 380.0f;
@@ -93,14 +119,93 @@ void CMyComponent::OnUpdate()
 		}
 	}
 
-	m_SilentAimActive = false;
+	m_aTargetId[DummyIdx] = BestId;
+	bool UserWantsHook = GameClient()->m_Controls.m_aInputData[DummyIdx].m_Hook;
+
+	bool PhysicalAimCanHook = false;
 	if(BestId != -1)
 	{
-		m_TargetId = BestId;
-		if(GameClient()->m_Controls.m_aInputData[g_Config.m_ClDummy].m_Hook)
+		vec2 TargetPos = GameClient()->m_aClients[BestId].m_RenderPos;
+		vec2 ClosestPoint;
+		if(closest_point_on_line(LocalPos, LocalPos + AimDir * HookLength, TargetPos, ClosestPoint))
 		{
-			m_SilentAimActive = true;
-			m_SilentAimVector = GameClient()->m_aClients[BestId].m_RenderPos - LocalPos;
+			if(distance(TargetPos, ClosestPoint) < 28.0f)
+			{
+				PhysicalAimCanHook = true;
+			}
+		}
+	}
+
+	if(PhysicalAimCanHook)
+	{
+		m_aAimState[DummyIdx] = STATE_IDLE;
+		m_aHookOverride[DummyIdx] = false;
+	}
+	else
+	{
+		switch(m_aAimState[DummyIdx])
+		{
+		case STATE_IDLE:
+			m_aHookOverride[DummyIdx] = false;
+			if(UserWantsHook && m_aTargetId[DummyIdx] != -1)
+			{
+				m_aAimState[DummyIdx] = STATE_AIMING_IN;
+				m_aCurrentAim[DummyIdx] = GameClient()->m_Controls.m_aMousePos[DummyIdx];
+			}
+			break;
+
+		case STATE_AIMING_IN:
+			m_aHookOverride[DummyIdx] = false;
+			if(!UserWantsHook || m_aTargetId[DummyIdx] == -1)
+			{
+				m_aAimState[DummyIdx] = STATE_AIMING_OUT;
+			}
+			else
+			{
+				vec2 TargetDir = GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos - LocalPos;
+				float Jitter = GetJitterAngle(DummyIdx);
+				float TargetAngle = angle(TargetDir) + Jitter;
+				vec2 JitteredTarget = direction(TargetAngle) * length(TargetDir);
+
+				m_aCurrentAim[DummyIdx] = mix(m_aCurrentAim[DummyIdx], JitteredTarget, 0.22f);
+
+				if(dot(normalize(m_aCurrentAim[DummyIdx]), normalize(TargetDir)) > 0.992f)
+				{
+					m_aAimState[DummyIdx] = STATE_HOOKING;
+				}
+			}
+			break;
+
+		case STATE_HOOKING:
+			m_aHookOverride[DummyIdx] = true;
+			if(!UserWantsHook || m_aTargetId[DummyIdx] == -1)
+			{
+				m_aHookOverride[DummyIdx] = false;
+				m_aAimState[DummyIdx] = STATE_AIMING_OUT;
+			}
+			else
+			{
+				vec2 TargetDir = GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos - LocalPos;
+				float Jitter = GetJitterAngle(DummyIdx);
+				float TargetAngle = angle(TargetDir) + Jitter;
+				vec2 JitteredTarget = direction(TargetAngle) * length(TargetDir);
+
+				m_aCurrentAim[DummyIdx] = mix(m_aCurrentAim[DummyIdx], JitteredTarget, 0.35f);
+			}
+			break;
+
+		case STATE_AIMING_OUT:
+			m_aHookOverride[DummyIdx] = false;
+			{
+				vec2 PhysMouse = GameClient()->m_Controls.m_aMousePos[DummyIdx];
+				m_aCurrentAim[DummyIdx] = mix(m_aCurrentAim[DummyIdx], PhysMouse, 0.20f);
+
+				if(distance(m_aCurrentAim[DummyIdx], PhysMouse) < 8.0f)
+				{
+					m_aAimState[DummyIdx] = STATE_IDLE;
+				}
+			}
+			break;
 		}
 	}
 }
@@ -127,9 +232,10 @@ void CMyComponent::OnRender()
 	vec2 TargetPos;
 	bool Locked = false;
 
-	if(m_TargetId != -1 && GameClient()->m_aClients[m_TargetId].m_Active && GameClient()->m_Snap.m_aCharacters[m_TargetId].m_Active)
+	const int DummyIdx = g_Config.m_ClDummy;
+	if(m_aTargetId[DummyIdx] != -1 && GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_Active && GameClient()->m_Snap.m_aCharacters[m_aTargetId[DummyIdx]].m_Active)
 	{
-		TargetPos = GameClient()->m_aClients[m_TargetId].m_RenderPos;
+		TargetPos = GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos;
 		Locked = true;
 	}
 	else
@@ -203,4 +309,19 @@ void CMyComponent::OnRender()
 	IGraphics::CQuadItem Quad(TargetPos.x - 8.0f, TargetPos.y - 48.0f, 16.0f, 16.0f);
 	Graphics()->QuadsDrawTL(&Quad, 1);
 	Graphics()->QuadsEnd();
+}
+
+bool CMyComponent::IsSilentAimActive(int DummyIdx) const
+{
+	return m_aAimState[DummyIdx] != STATE_IDLE;
+}
+
+vec2 CMyComponent::GetSilentAimVector(int DummyIdx) const
+{
+	return m_aCurrentAim[DummyIdx];
+}
+
+bool CMyComponent::GetHookOverride(int DummyIdx) const
+{
+	return m_aHookOverride[DummyIdx];
 }
