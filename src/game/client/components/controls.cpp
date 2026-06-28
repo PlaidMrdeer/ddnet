@@ -183,85 +183,71 @@ void CControls::OnMessage(int Msg, void *pRawMsg)
 
 int CControls::SnapInput(int *pData)
 {
+	const int DummyIdx = g_Config.m_ClDummy;
 	if(GameClient()->m_Chat.IsActive())
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_CHATTING;
+		m_aInputData[DummyIdx].m_PlayerFlags = PLAYERFLAG_CHATTING;
 	else if(GameClient()->m_Menus.IsActive())
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_IN_MENU;
+		m_aInputData[DummyIdx].m_PlayerFlags = PLAYERFLAG_IN_MENU;
 	else
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags = PLAYERFLAG_PLAYING;
+		m_aInputData[DummyIdx].m_PlayerFlags = PLAYERFLAG_PLAYING;
 
 	if(GameClient()->m_Scoreboard.IsActive())
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_SCOREBOARD;
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_SCOREBOARD;
 
-	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Controls.m_aShowHookColl[g_Config.m_ClDummy])
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_AIM;
+	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Controls.m_aShowHookColl[DummyIdx])
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_AIM;
 
 	if(Client()->ServerCapAnyPlayerFlag() && GameClient()->m_Camera.CamType() == CCamera::CAMTYPE_SPEC)
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_SPEC_CAM;
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_SPEC_CAM;
 
-	switch(m_aMouseInputType[g_Config.m_ClDummy])
+	switch(m_aMouseInputType[DummyIdx])
 	{
 	case CControls::EMouseInputType::AUTOMATED:
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
 		break;
 	case CControls::EMouseInputType::ABSOLUTE:
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE | PLAYERFLAG_INPUT_MANUAL;
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE | PLAYERFLAG_INPUT_MANUAL;
 		break;
 	case CControls::EMouseInputType::RELATIVE:
-		m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_INPUT_MANUAL;
+		m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_MANUAL;
 		break;
 	}
 
-	bool Send = m_aLastData[g_Config.m_ClDummy].m_PlayerFlags != m_aInputData[g_Config.m_ClDummy].m_PlayerFlags;
+	bool Send = m_aLastData[DummyIdx].m_PlayerFlags != m_aInputData[DummyIdx].m_PlayerFlags;
 
-	m_aLastData[g_Config.m_ClDummy].m_PlayerFlags = m_aInputData[g_Config.m_ClDummy].m_PlayerFlags;
+	m_aLastData[DummyIdx].m_PlayerFlags = m_aInputData[DummyIdx].m_PlayerFlags;
 
-	if(!(m_aInputData[g_Config.m_ClDummy].m_PlayerFlags & PLAYERFLAG_PLAYING))
+	if(!(m_aInputData[DummyIdx].m_PlayerFlags & PLAYERFLAG_PLAYING))
 	{
 		if(!GameClient()->m_GameInfo.m_BugDDRaceInput)
-			ResetInput(g_Config.m_ClDummy);
+			ResetInput(DummyIdx);
 
-		mem_copy(pData, &m_aInputData[g_Config.m_ClDummy], sizeof(m_aInputData[0]));
+		mem_copy(pData, &m_aInputData[DummyIdx], sizeof(m_aInputData[0]));
 
-		m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)m_aMousePos[g_Config.m_ClDummy].x;
-		m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)m_aMousePos[g_Config.m_ClDummy].y;
+		m_aInputData[DummyIdx].m_TargetX = (int)m_aMousePos[DummyIdx].x;
+		m_aInputData[DummyIdx].m_TargetY = (int)m_aMousePos[DummyIdx].y;
 
 		Send = Send || time_get() > m_LastSendTime + time_freq();
 	}
 	else
 	{
-		m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)m_aMousePos[g_Config.m_ClDummy].x;
-		m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)m_aMousePos[g_Config.m_ClDummy].y;
+		m_aInputData[DummyIdx].m_TargetX = (int)m_aMousePos[DummyIdx].x;
+		m_aInputData[DummyIdx].m_TargetY = (int)m_aMousePos[DummyIdx].y;
 
-		if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[g_Config.m_ClDummy] != vec2(0.0f, 0.0f))
+		if(g_Config.m_ClSubTickAiming && m_aMousePosOnAction[DummyIdx] != vec2(0.0f, 0.0f))
 		{
-			m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)m_aMousePosOnAction[g_Config.m_ClDummy].x;
-			m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)m_aMousePosOnAction[g_Config.m_ClDummy].y;
-			m_aMousePosOnAction[g_Config.m_ClDummy] = vec2(0.0f, 0.0f);
+			m_aInputData[DummyIdx].m_TargetX = (int)m_aMousePosOnAction[DummyIdx].x;
+			m_aInputData[DummyIdx].m_TargetY = (int)m_aMousePosOnAction[DummyIdx].y;
+			m_aMousePosOnAction[DummyIdx] = vec2(0.0f, 0.0f);
 		}
 
-		static int s_aSilentAimTicks[NUM_DUMMIES] = {0, 0};
-		const int DummyIdx = g_Config.m_ClDummy;
-
-		if(m_aInputData[DummyIdx].m_Hook)
+		if(GameClient()->m_MyComponent.IsSilentAimActive(DummyIdx))
 		{
-			if(!m_aLastData[DummyIdx].m_Hook)
-			{
-				s_aSilentAimTicks[DummyIdx] = 2;
-			}
-
-			if(s_aSilentAimTicks[DummyIdx] > 0 && GameClient()->m_MyComponent.IsSilentAimActive())
-			{
-				vec2 SilentAimVec = GameClient()->m_MyComponent.GetSilentAimVector();
-				m_aInputData[DummyIdx].m_TargetX = (int)SilentAimVec.x;
-				m_aInputData[DummyIdx].m_TargetY = (int)SilentAimVec.y;
-				m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
-				s_aSilentAimTicks[DummyIdx]--;
-			}
-		}
-		else
-		{
-			s_aSilentAimTicks[DummyIdx] = 0;
+			vec2 SilentAimVec = GameClient()->m_MyComponent.GetSilentAimVector(DummyIdx);
+			m_aInputData[DummyIdx].m_TargetX = (int)SilentAimVec.x;
+			m_aInputData[DummyIdx].m_TargetY = (int)SilentAimVec.y;
+			m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+			m_aInputData[DummyIdx].m_Hook = GameClient()->m_MyComponent.GetHookOverride(DummyIdx) ? 1 : 0;
 		}
 
 		if(!m_aInputData[g_Config.m_ClDummy].m_TargetX && !m_aInputData[g_Config.m_ClDummy].m_TargetY)
