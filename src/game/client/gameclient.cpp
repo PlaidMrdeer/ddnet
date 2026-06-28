@@ -119,30 +119,28 @@ void CGameClient::OnConsoleInit()
 	m_pHttp = Kernel()->RequestInterface<IHttp>();
 	m_pMap = CreateMap();
 
-	// make a list of all the systems, make sure to add them in the correct render order
 	m_vpAll.insert(m_vpAll.end(), {&m_Skins,
 					      &m_Skins7,
 					      &m_CountryFlags,
 					      &m_MapImages,
-					      &m_Effects, // doesn't render anything, just updates effects
+					      &m_Effects,
 					      &m_Binds,
 					      &m_Binds.m_SpecialBinds,
 					      &m_Controls,
 					      &m_Camera,
 					      &m_Sounds,
 					      &m_Voting,
-					      &m_Particles, // doesn't render anything, just updates all the particles
+					      &m_Particles,
 					      &m_RaceDemo,
 					      &m_MapSounds,
 					      &m_Censor,
-					      &m_Background, // render instead of m_MapLayersBackground when g_Config.m_ClOverlayEntities == 100
-					      &m_MapLayersBackground, // first to render
+					      &m_Background,
+					      &m_MapLayersBackground,
 					      &m_Particles.m_RenderTrail,
 					      &m_Particles.m_RenderTrailExtra,
 					      &m_Items,
 					      &m_Ghost,
 					      &m_Players,
-						  &m_MyComponent,
 					      &m_MapLayersForeground,
 					      &m_Particles.m_RenderExplosions,
 					      &m_NamePlates,
@@ -150,6 +148,7 @@ void CGameClient::OnConsoleInit()
 					      &m_Particles.m_RenderGeneral,
 					      &m_FreezeBars,
 					      &m_DamageInd,
+					      &m_MyComponent,
 					      &m_Hud,
 					      &m_Spectator,
 					      &m_Emoticon,
@@ -168,13 +167,12 @@ void CGameClient::OnConsoleInit()
 					      &m_GameConsole,
 					      &m_MenuBackground});
 
-	// build the input stack
-	m_vpInput.insert(m_vpInput.end(), {&m_KeyBinder, // this will take over all input when we want to bind a key
+	m_vpInput.insert(m_vpInput.end(), {&m_KeyBinder,
 						  &m_Binds.m_SpecialBinds,
 						  &m_GameConsole,
-						  &m_Chat, // chat has higher prio, due to that you can quit it by pressing esc
+						  &m_Chat,
 						  &m_Scoreboard,
-						  &m_Motd, // for pressing esc to remove it
+						  &m_Motd,
 						  &m_Spectator,
 						  &m_Emoticon,
 						  &m_ImportantAlert,
@@ -183,7 +181,6 @@ void CGameClient::OnConsoleInit()
 						  &m_TouchControls,
 						  &m_Binds});
 
-	// initialize client data
 	for(int ClientId = 0; ClientId < MAX_CLIENTS; ClientId++)
 	{
 		CClientData &Client = m_aClients[ClientId];
@@ -191,12 +188,10 @@ void CGameClient::OnConsoleInit()
 		Client.m_ClientId = ClientId;
 	}
 
-	// add basic console commands
 	Console()->Register("team", "i[team-id]", CFGFLAG_CLIENT, ConTeam, this, "Switch team");
 	Console()->Register("kill", "", CFGFLAG_CLIENT, ConKill, this, "Kill yourself to restart");
 	Console()->Register("ready_change", "", CFGFLAG_CLIENT, ConReadyChange7, this, "Change ready state (0.7 only)");
 
-	// register game commands to allow the client prediction to load settings from the map
 	Console()->Register("tune", "s[tuning] ?f[value]", CFGFLAG_GAME, ConTuneParam, this, "Tune variable to value");
 	Console()->Register("tune_zone", "i[zone] s[tuning] f[value]", CFGFLAG_GAME, ConTuneZone, this, "Tune in zone a variable to value");
 	Console()->Register("mapbug", "s[mapbug]", CFGFLAG_GAME, ConMapbug, this, "Enable map compatibility mode using the specified bug (example: grenade-doubleexplosion@ddnet.tw)");
@@ -206,7 +201,6 @@ void CGameClient::OnConsoleInit()
 
 	m_LocalServer.OnInterfacesInit(this);
 
-	// let all the other components register their console commands
 	for(auto &pComponent : m_vpAll)
 		pComponent->OnConsoleInit();
 
