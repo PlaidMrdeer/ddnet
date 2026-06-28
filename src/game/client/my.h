@@ -28,7 +28,7 @@ private:
 
 	bool m_aAvoidEnabled[NUM_DUMMIES];
 	int m_aAvoidDirection[NUM_DUMMIES];
-	bool m_aAvoidJump[NUM_DUMMIES];
+	bool m_aAvoidActive[NUM_DUMMIES];
 
 	float GetJitterAngle(int DummyIdx) const;
 
@@ -59,7 +59,6 @@ public:
 
 	bool IsAvoidActive(int DummyIdx) const;
 	int GetAvoidDirection(int DummyIdx) const;
-	bool GetAvoidJump(int DummyIdx) const;
 };
 
 #endif

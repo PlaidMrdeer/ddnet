@@ -23,7 +23,7 @@ void CMyComponent::OnReset()
 
 		m_aAvoidEnabled[i] = false;
 		m_aAvoidDirection[i] = 0;
-		m_aAvoidJump[i] = false;
+		m_aAvoidActive[i] = false;
 	}
 }
 
@@ -91,7 +91,7 @@ void CMyComponent::OnUpdate()
 	const int DummyIdx = g_Config.m_ClDummy;
 
 	m_aAvoidDirection[DummyIdx] = 0;
-	m_aAvoidJump[DummyIdx] = false;
+	m_aAvoidActive[DummyIdx] = false;
 
 	if(m_aAvoidEnabled[DummyIdx])
 	{
@@ -107,49 +107,142 @@ void CMyComponent::OnUpdate()
 			else if(!GameClient()->m_Controls.m_aInputDirectionLeft[DummyIdx] && GameClient()->m_Controls.m_aInputDirectionRight[DummyIdx])
 				InputDir = 1;
 
-			if(InputDir != 0)
+			int TravelDir = InputDir;
+			if(TravelDir == 0)
 			{
-				float MinSpeed = 4.0f;
-				if(InputDir == 1 && Vel.x < MinSpeed)
-					Vel.x = MinSpeed;
-				else if(InputDir == -1 && Vel.x > -MinSpeed)
-					Vel.x = -MinSpeed;
+				if(Vel.x > 0.5f)
+					TravelDir = 1;
+				else if(Vel.x < -0.5f)
+					TravelDir = -1;
 			}
 
-			bool WillHitDanger = false;
-			vec2 AvoidDir = vec2(0.0f, 0.0f);
-
-			for(int ticks = 1; ticks <= 15; ++ticks)
+			if(TravelDir != 0)
 			{
-				vec2 PredPos = LocalPos + Vel * (float)ticks;
-				int Index = Collision()->GetPureMapIndex(PredPos);
-				int Tile = Collision()->GetTileIndex(Index);
-				int FTile = Collision()->GetFrontTileIndex(Index);
+				int StartTileX = round_to_int(LocalPos.x) / 32;
+				int TileY = round_to_int(LocalPos.y) / 32;
+				
+				bool OnGround = Collision()->IsOnGround(LocalPos, 28.0f);
+				float Friction = OnGround ? 0.5f : 0.95f;
 
-				if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
-				   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+				// 【精准计算核心 1】逆向推算当前速度下完全刹车所需的绝对距离 (像素)
+				// Teeworlds 物理模型中：X_next = X + Vel_x; Vel_x_next = Vel_x * Friction;
+				// 理论刹车总距离公式为：刹车像素 = |Vel.x| * Friction / (1.0f - Friction)
+				float BrakeDistance = 0.0f;
+				if (std::abs(Vel.x) > 0.1f)
 				{
-					WillHitDanger = true;
-					vec2 TileCenter = vec2((Index % Collision()->GetWidth()) * 32.0f + 16.0f, (Index / Collision()->GetWidth()) * 32.0f + 16.0f);
-					AvoidDir = LocalPos - TileCenter;
-					break;
-				}
-			}
-
-			if(WillHitDanger)
-			{
-				if(AvoidDir.x > 0.0f)
-				{
-					m_aAvoidDirection[DummyIdx] = 1;
-				}
-				else if(AvoidDir.x < 0.0f)
-				{
-					m_aAvoidDirection[DummyIdx] = -1;
+					// 额外附加一个半身宽的缓冲区(14.0f像素)，防止物理Tick采样误差导致边缘滑入
+					BrakeDistance = (std::abs(Vel.x) * Friction) / (1.0f - Friction) + 14.0f;
 				}
 
-				if(Vel.y > 0.5f && AvoidDir.y < 0.0f)
+				// 根据精确刹车距离动态计算需要扫描多少个 Tile，至少扫 8 个，至多扫 24 个（应对超高速）
+				int ScanTiles = std::max(8, std::min(24, round_to_int(BrakeDistance / 32.0f) + 2));
+				int FreezeTileX = -1;
+
+				if(TravelDir == 1)
 				{
-					m_aAvoidJump[DummyIdx] = true;
+					for(int tx = StartTileX + 1; tx <= StartTileX + ScanTiles; ++tx)
+					{
+						bool Found = false;
+						for(int ty = TileY - 1; ty <= TileY + 1; ++ty)
+						{
+							if(ty < 0 || ty >= Collision()->GetHeight())
+								continue;
+							int Index = ty * Collision()->GetWidth() + tx;
+							if(Index >= 0 && Index < Collision()->GetWidth() * Collision()->GetHeight())
+							{
+								int Tile = Collision()->GetTileIndex(Index);
+								int FTile = Collision()->GetFrontTileIndex(Index);
+								if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
+								   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+								{
+									Found = true;
+									break;
+								}
+							}
+						}
+						if(Found)
+						{
+							FreezeTileX = tx;
+							break;
+						}
+					}
+				}
+				else if(TravelDir == -1)
+				{
+					for(int tx = StartTileX - 1; tx >= StartTileX - ScanTiles; --tx)
+					{
+						bool Found = false;
+						for(int ty = TileY - 1; ty <= TileY + 1; ++ty)
+						{
+							if(ty < 0 || ty >= Collision()->GetHeight())
+								continue;
+							int Index = ty * Collision()->GetWidth() + tx;
+							if(Index >= 0 && Index < Collision()->GetWidth() * Collision()->GetHeight())
+							{
+								int Tile = Collision()->GetTileIndex(Index);
+								int FTile = Collision()->GetFrontTileIndex(Index);
+								if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
+								   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+								{
+									Found = true;
+									break;
+								}
+							}
+						}
+						if(Found)
+						{
+							FreezeTileX = tx;
+							break;
+						}
+					}
+				}
+
+				if(FreezeTileX != -1)
+				{
+					// 计算到冻结/死亡水体边缘的绝对物理距离
+					float TargetX = TravelDir == 1 ? (FreezeTileX * 32.0f) : ((FreezeTileX + 1) * 32.0f);
+					float DistToWater = TravelDir == 1 ? (TargetX - LocalPos.x) : (LocalPos.x - TargetX);
+					bool WillCross = false;
+
+					// 【精准计算核心 2】当到水边缘的距离小于或等于预测出的刹车距离时，立刻判定需要急停
+					if(DistToWater <= BrakeDistance)
+					{
+						WillCross = true;
+					}
+					else
+					{
+						// 多层保障：通过多 Tick 仿真进一步验证极端惯性
+						float SimX = LocalPos.x;
+						float SimVelX = Vel.x;
+
+						for(int step = 0; step < 30; ++step)
+						{
+							SimVelX *= Friction;
+							SimX += SimVelX;
+							if(TravelDir == 1 && SimX >= TargetX - 14.0f)
+							{
+								WillCross = true;
+								break;
+							}
+							if(TravelDir == -1 && SimX <= TargetX + 14.0f)
+							{
+								WillCross = true;
+								break;
+							}
+						}
+					}
+
+					if(WillCross)
+					{
+						m_aAvoidActive[DummyIdx] = true;
+						// 执行反向最高优先级输入以达到最大制动效果
+						if(Vel.x > 0.1f)
+							m_aAvoidDirection[DummyIdx] = -1;
+						else if(Vel.x < -0.1f)
+							m_aAvoidDirection[DummyIdx] = 1;
+						else
+							m_aAvoidDirection[DummyIdx] = 0;
+					}
 				}
 			}
 		}
@@ -435,15 +528,10 @@ ColorRGBA CMyComponent::GetTargetColor(int ClientId, int DummyIdx) const
 
 bool CMyComponent::IsAvoidActive(int DummyIdx) const
 {
-	return m_aAvoidEnabled[DummyIdx];
+	return m_aAvoidEnabled[DummyIdx] && m_aAvoidActive[DummyIdx];
 }
 
 int CMyComponent::GetAvoidDirection(int DummyIdx) const
 {
 	return m_aAvoidDirection[DummyIdx];
-}
-
-bool CMyComponent::GetAvoidJump(int DummyIdx) const
-{
-	return m_aAvoidJump[DummyIdx];
 }
