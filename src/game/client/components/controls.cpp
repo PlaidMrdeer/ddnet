@@ -262,6 +262,21 @@ int CControls::SnapInput(int *pData)
 		if(!m_aInputDirectionLeft[g_Config.m_ClDummy] && m_aInputDirectionRight[g_Config.m_ClDummy])
 			m_aInputData[g_Config.m_ClDummy].m_Direction = 1;
 
+		if(GameClient()->m_MyComponent.IsAvoidActive(DummyIdx))
+		{
+			int AvoidDir = GameClient()->m_MyComponent.GetAvoidDirection(DummyIdx);
+			if(AvoidDir != 0)
+			{
+				m_aInputData[DummyIdx].m_Direction = AvoidDir;
+				m_aInputDirectionLeft[DummyIdx] = (AvoidDir == -1) ? 1 : 0;
+				m_aInputDirectionRight[DummyIdx] = (AvoidDir == 1) ? 1 : 0;
+			}
+			if(GameClient()->m_MyComponent.GetAvoidJump(DummyIdx))
+			{
+				m_aInputData[DummyIdx].m_Jump = 1;
+			}
+		}
+
 		if(g_Config.m_ClDummyCopyMoves)
 		{
 			CNetObj_PlayerInput *pDummyInput = &GameClient()->m_DummyInput;
