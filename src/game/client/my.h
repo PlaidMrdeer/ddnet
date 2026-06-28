@@ -5,8 +5,13 @@
 
 class CMyComponent : public CComponent
 {
+private:
+	int m_TargetId = -1;
+
 public:
 	int Sizeof() const override { return sizeof(*this); }
+	void OnReset() override { m_TargetId = -1; }
+	void OnUpdate() override;
 	void OnRender() override;
 };
 
