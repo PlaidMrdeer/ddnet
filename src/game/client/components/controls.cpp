@@ -240,12 +240,28 @@ int CControls::SnapInput(int *pData)
 			m_aMousePosOnAction[g_Config.m_ClDummy] = vec2(0.0f, 0.0f);
 		}
 
-		if(GameClient()->m_MyComponent.IsSilentAimActive())
+		static int s_aSilentAimTicks[NUM_DUMMIES] = {0, 0};
+		const int DummyIdx = g_Config.m_ClDummy;
+
+		if(m_aInputData[DummyIdx].m_Hook)
 		{
-			vec2 SilentAimVec = GameClient()->m_MyComponent.GetSilentAimVector();
-			m_aInputData[g_Config.m_ClDummy].m_TargetX = (int)SilentAimVec.x;
-			m_aInputData[g_Config.m_ClDummy].m_TargetY = (int)SilentAimVec.y;
-			m_aInputData[g_Config.m_ClDummy].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+			if(!m_aLastData[DummyIdx].m_Hook)
+			{
+				s_aSilentAimTicks[DummyIdx] = 2;
+			}
+
+			if(s_aSilentAimTicks[DummyIdx] > 0 && GameClient()->m_MyComponent.IsSilentAimActive())
+			{
+				vec2 SilentAimVec = GameClient()->m_MyComponent.GetSilentAimVector();
+				m_aInputData[DummyIdx].m_TargetX = (int)SilentAimVec.x;
+				m_aInputData[DummyIdx].m_TargetY = (int)SilentAimVec.y;
+				m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+				s_aSilentAimTicks[DummyIdx]--;
+			}
+		}
+		else
+		{
+			s_aSilentAimTicks[DummyIdx] = 0;
 		}
 
 		if(!m_aInputData[g_Config.m_ClDummy].m_TargetX && !m_aInputData[g_Config.m_ClDummy].m_TargetY)
