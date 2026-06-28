@@ -1,5 +1,3 @@
-/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
-/* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "controls.h"
 
 #include <base/dbg.h>
@@ -264,18 +262,10 @@ int CControls::SnapInput(int *pData)
 
 		if(GameClient()->m_MyComponent.IsAvoidActive(DummyIdx))
 		{
-			int AvoidDir = GameClient()->m_MyComponent.GetAvoidDirection(DummyIdx);
-			if(AvoidDir != 0)
-			{
-				m_aInputData[DummyIdx].m_Direction = AvoidDir;
-				m_aInputDirectionLeft[DummyIdx] = 0;
-				m_aInputDirectionRight[DummyIdx] = 0;
-				m_aInputData[DummyIdx].m_Jump = 0;
-			}
-			if(GameClient()->m_MyComponent.GetAvoidJump(DummyIdx))
-			{
-				m_aInputData[DummyIdx].m_Jump = 1;
-			}
+			m_aInputData[DummyIdx].m_Direction = GameClient()->m_MyComponent.GetAvoidDirection(DummyIdx);
+			m_aInputDirectionLeft[DummyIdx] = 0;
+			m_aInputDirectionRight[DummyIdx] = 0;
+			m_aInputData[DummyIdx].m_Jump = 0;
 		}
 
 		if(g_Config.m_ClDummyCopyMoves)
