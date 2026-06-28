@@ -881,7 +881,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	ModeList.HSplitTop(24.0f, &ModeLabel, &ModeList);
 	MainView.VSplitLeft(340.0f, &MainView, nullptr);
 
-	// display mode list
 	static CListBox s_ListBox;
 	static const float sc_RowHeightResList = 22.0f;
 	static const float sc_FontSizeResListHeader = 12.0f;
@@ -930,7 +929,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		Graphics()->ResizeToScreen();
 	}
 
-	// switches
 	CUIRect WindowModeDropDown;
 	MainView.HSplitTop(20.0f, &WindowModeDropDown, &MainView);
 
@@ -997,14 +995,14 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	str_format(aBuf, sizeof(aBuf), "%s (%s)", Localize("FSAA samples"), Localize("may cause delay"));
 	int GfxFsaaSamplesMouseButton = DoButton_CheckBox_Number(&g_Config.m_GfxFsaaSamples, aBuf, g_Config.m_GfxFsaaSamples, &Button);
 	int CurFSAA = g_Config.m_GfxFsaaSamples == 0 ? 1 : g_Config.m_GfxFsaaSamples;
-	if(GfxFsaaSamplesMouseButton == 1) // inc
+	if(GfxFsaaSamplesMouseButton == 1)
 	{
 		g_Config.m_GfxFsaaSamples = std::pow(2, (int)std::log2(CurFSAA) + 1);
 		if(g_Config.m_GfxFsaaSamples > 64)
 			g_Config.m_GfxFsaaSamples = 0;
 		MultiSamplingChanged = true;
 	}
-	else if(GfxFsaaSamplesMouseButton == 2) // dec
+	else if(GfxFsaaSamplesMouseButton == 2)
 	{
 		if(CurFSAA == 1)
 			g_Config.m_GfxFsaaSamples = 64;
@@ -1020,8 +1018,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	{
 		if(Graphics()->SetMultiSampling(g_Config.m_GfxFsaaSamples, MultiSamplingCountBackend))
 		{
-			// try again with 0 if mouse click was increasing multi sampling
-			// else just accept the current value as is
 			if((uint32_t)g_Config.m_GfxFsaaSamples > MultiSamplingCountBackend && GfxFsaaSamplesMouseButton == 1)
 				Graphics()->SetMultiSampling(0, MultiSamplingCountBackend);
 			g_Config.m_GfxFsaaSamples = (int)MultiSamplingCountBackend;
@@ -1047,11 +1043,20 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 	str_append(aBuf, Localize("Hz", "Hertz"));
 	Ui()->DoScrollbarOption(&g_Config.m_GfxRefreshRate, &g_Config.m_GfxRefreshRate, &Button, Localize("Refresh Rate"), 10, 1000, &CUi::ms_LinearScrollbarScale, CUi::SCROLLBAR_OPTION_INFINITE | CUi::SCROLLBAR_OPTION_NOCLAMPVALUE | CUi::SCROLLBAR_OPTION_DELAYUPDATE, aBuf);
 
+	MainView.HSplitTop(20.0f, &Button, &MainView);
+	int DummyIdx = g_Config.m_ClDummy;
+	int CurFov = GameClient()->m_MyComponent.GetFov(DummyIdx);
+	int NewFov = CurFov;
+	static char s_AutoAimFovId;
+	if(Ui()->DoScrollbarOption(&s_AutoAimFovId, &NewFov, &Button, Localize("Auto Aim FOV"), 1, 360))
+	{
+		GameClient()->m_MyComponent.SetFov(DummyIdx, NewFov);
+	}
+
 	MainView.HSplitTop(2.0f, nullptr, &MainView);
 	static CButtonContainer s_UiColorResetId;
 	DoLine_ColorPicker(&s_UiColorResetId, 25.0f, 13.0f, 2.0f, &MainView, Localize("UI Color"), &g_Config.m_UiColor, color_cast<ColorRGBA>(ColorHSLA(0xE4A046AFU, true)), false, nullptr, true);
 
-	// Backend list
 	struct SMenuBackendInfo
 	{
 		int m_Major = 0;
@@ -1071,7 +1076,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 			auto &Info = aaSupportedBackends[i][n];
 			if(Graphics()->GetDriverVersion(EGraphicsDriverAgeType(n), Info.m_Major, Info.m_Minor, Info.m_Patch, Info.m_pBackendName, EBackendType(i)))
 			{
-				// don't count blocked opengl drivers
 				if(EBackendType(i) != BACKEND_TYPE_OPENGL || EGraphicsDriverAgeType(n) == GRAPHICS_DRIVER_AGE_TYPE_LEGACY || g_Config.m_GfxDriverIsBlocked == 0)
 				{
 					Info.m_Found = true;
@@ -1131,12 +1135,10 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 
 		if(OldSelectedBackend != -1)
 		{
-			// no custom selected
 			BackendCount -= 1;
 		}
 		else
 		{
-			// custom selected one
 			str_format(aTmpBackendName, sizeof(aTmpBackendName), "%s (%s %d.%d.%d)", Localize("custom"), g_Config.m_GfxBackend, g_Config.m_GfxGLMajor, g_Config.m_GfxGLMinor, g_Config.m_GfxGLPatch);
 			s_vBackendIdNames[CurCounter] = aTmpBackendName;
 			s_vpBackendIdNamesCStr[CurCounter] = s_vBackendIdNames[CurCounter].c_str();
@@ -1168,7 +1170,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		}
 	}
 
-	// GPU list
 	const auto &GpuList = Graphics()->GetGpus();
 	if(GpuList.m_vGpus.size() > 1)
 	{
@@ -1227,7 +1228,6 @@ void CMenus::RenderSettingsGraphics(CUIRect MainView)
 		}
 	}
 
-	// check if the new settings require a restart
 	if(CheckSettings)
 	{
 		m_NeedRestartGraphics = !(s_GfxFsaaSamples == g_Config.m_GfxFsaaSamples &&
