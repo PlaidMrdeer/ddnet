@@ -6,6 +6,7 @@
 #include <base/vmath.h>
 #include <cmath>
 #include <algorithm>
+#include <limits>
 #include <game/mapitems.h>
 #include <game/collision.h>
 
@@ -188,9 +189,9 @@ void CMyComponent::OnUpdate()
 	float HalfAngleRad = (m_aFov[DummyIdx] / 2.0f) * (pi / 180.0f);
 	float MinCos = std::cos(HalfAngleRad);
 
-	float BestScore = -1.0f;
-	float BestCos = MinCos; 
+	float BestDistToMouse = std::numeric_limits<float>::max();
 	int BestId = -1;
+	vec2 MouseWorldPos = LocalPos + GameClient()->m_Controls.m_aMousePos[DummyIdx];
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -231,12 +232,12 @@ void CMyComponent::OnUpdate()
 		TargetDir = normalize(TargetDir);
 
 		float CosTheta = dot(AimDir, TargetDir);
-		if(CosTheta > BestCos)
+		if(CosTheta >= MinCos)
 		{
-			float Score = CosTheta * (1.0f - (Dist / HookLength) * 0.15f);
-			if(Score > BestScore)
+			float DistToMouse = distance(TargetPos, MouseWorldPos);
+			if(DistToMouse < BestDistToMouse)
 			{
-				BestScore = Score;
+				BestDistToMouse = DistToMouse;
 				BestId = i;
 			}
 		}
