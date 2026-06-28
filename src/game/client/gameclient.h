@@ -69,6 +69,7 @@
 #include "components/tooltips.h"
 #include "components/touch_controls.h"
 #include "components/voting.h"
+#include "my.h"
 
 #include <memory>
 #include <vector>
@@ -143,6 +144,7 @@ class CGameClient : public IGameClient
 {
 public:
 	// all components
+	CMyComponent m_MyComponent;
 	CInfoMessages m_InfoMessages;
 	CCamera m_Camera;
 	CChat m_Chat;
