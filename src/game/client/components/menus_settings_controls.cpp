@@ -96,6 +96,8 @@ void CMenusSettingsControls::OnInterfacesInit(CGameClient *pClient)
 		{EBindOptionGroup::DUMMY, Localizable("Hammerfly dummy"), "toggle cl_dummy_hammer 0 1"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Auto Aim"), "toggle_silentaim"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Auto Aim"), "+silentaim"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Avoid Freeze"), "toggle_avoidfreeze"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Avoid Freeze"), "+avoidfreeze"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Emoticon"), "+emote"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectator mode"), "+spectate"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectate next"), "spectate_next"},

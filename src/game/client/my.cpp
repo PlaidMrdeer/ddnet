@@ -6,6 +6,8 @@
 #include <base/vmath.h>
 #include <cmath>
 #include <algorithm>
+#include <game/mapitems.h>
+#include <game/collision.h>
 
 void CMyComponent::OnReset()
 {
@@ -17,6 +19,10 @@ void CMyComponent::OnReset()
 		m_aHookOverride[i] = false;
 		m_aEnabled[i] = false;
 		m_aFov[i] = 50;
+
+		m_aAvoidEnabled[i] = false;
+		m_aAvoidDirection[i] = 0;
+		m_aAvoidJump[i] = false;
 	}
 }
 
@@ -25,6 +31,9 @@ void CMyComponent::OnConsoleInit()
 	Console()->Register("toggle_silentaim", "", CFGFLAG_CLIENT, ConToggleSilentAim, this, "Toggle Auto Aim");
 	Console()->Register("+silentaim", "", CFGFLAG_CLIENT, ConKeySilentAim, this, "Hold Auto Aim");
 	Console()->Register("cl_silentaim_fov", "i[fov]", CFGFLAG_CLIENT, ConFovSilentAim, this, "Set Auto Aim FOV");
+
+	Console()->Register("toggle_avoidfreeze", "", CFGFLAG_CLIENT, ConToggleAvoidFreeze, this, "Toggle Avoid Freeze");
+	Console()->Register("+avoidfreeze", "", CFGFLAG_CLIENT, ConKeyAvoidFreeze, this, "Hold Avoid Freeze");
 }
 
 void CMyComponent::ConToggleSilentAim(IConsole::IResult *pResult, void *pUserData)
@@ -43,6 +52,18 @@ void CMyComponent::ConFovSilentAim(IConsole::IResult *pResult, void *pUserData)
 {
 	CMyComponent *pSelf = (CMyComponent *)pUserData;
 	pSelf->SetFov(g_Config.m_ClDummy, pResult->GetInteger(0));
+}
+
+void CMyComponent::ConToggleAvoidFreeze(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAvoidEnabled[g_Config.m_ClDummy] = !pSelf->m_aAvoidEnabled[g_Config.m_ClDummy];
+}
+
+void CMyComponent::ConKeyAvoidFreeze(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAvoidEnabled[g_Config.m_ClDummy] = pResult->GetInteger(0) != 0;
 }
 
 float CMyComponent::GetJitterAngle(int DummyIdx) const
@@ -67,6 +88,57 @@ void CMyComponent::OnUpdate()
 	}
 
 	const int DummyIdx = g_Config.m_ClDummy;
+
+	m_aAvoidDirection[DummyIdx] = 0;
+	m_aAvoidJump[DummyIdx] = false;
+
+	if(m_aAvoidEnabled[DummyIdx])
+	{
+		int LocalId = GameClient()->m_Snap.m_LocalClientId;
+		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
+		{
+			vec2 LocalPos = GameClient()->m_aClients[LocalId].m_RenderPos;
+			vec2 Vel = GameClient()->m_aClients[LocalId].m_Predicted.m_Vel;
+
+			bool WillHitDanger = false;
+			vec2 AvoidDir = vec2(0.0f, 0.0f);
+
+			for(int ticks = 1; ticks <= 15; ++ticks)
+			{
+				vec2 PredPos = LocalPos + Vel * (ticks * 0.02f);
+				int Index = Collision()->GetPureMapIndex(PredPos);
+				int Tile = Collision()->GetTileIndex(Index);
+				int FTile = Collision()->GetFrontTileIndex(Index);
+
+				if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
+				   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+				{
+					WillHitDanger = true;
+					vec2 TileCenter = vec2((Index % Collision()->GetWidth()) * 32.0f + 16.0f, (Index / Collision()->GetWidth()) * 32.0f + 16.0f);
+					AvoidDir = LocalPos - TileCenter;
+					break;
+				}
+			}
+
+			if(WillHitDanger)
+			{
+				if(AvoidDir.x > 0.0f)
+				{
+					m_aAvoidDirection[DummyIdx] = 1;
+				}
+				else if(AvoidDir.x < 0.0f)
+				{
+					m_aAvoidDirection[DummyIdx] = -1;
+				}
+
+				if(Vel.y > 0.5f && AvoidDir.y < 0.0f)
+				{
+					m_aAvoidJump[DummyIdx] = true;
+				}
+			}
+		}
+	}
+
 	if(!m_aEnabled[DummyIdx])
 	{
 		m_aTargetId[DummyIdx] = -1;
@@ -254,17 +326,26 @@ void CMyComponent::OnRender()
 	}
 
 	const int DummyIdx = g_Config.m_ClDummy;
-	if(!m_aEnabled[DummyIdx])
-	{
-		return;
-	}
-
 	float Height = 300.0f;
 	float Width = Height * Graphics()->ScreenAspect();
 	Graphics()->MapScreen(0.0f, 0.0f, Width, Height);
 
-	TextRender()->TextColor(0.0f, 1.0f, 0.0f, 1.0f);
-	TextRender()->Text(Width - 110.0f, 150.0f, 8.0f, "AUTO AIM: ACTIVE");
+	float DisplayY = 150.0f;
+
+	if(m_aEnabled[DummyIdx])
+	{
+		TextRender()->TextColor(0.0f, 1.0f, 0.0f, 1.0f);
+		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AUTO AIM: ACTIVE");
+		DisplayY += 10.0f;
+	}
+
+	if(m_aAvoidEnabled[DummyIdx])
+	{
+		TextRender()->TextColor(0.0f, 0.8f, 1.0f, 1.0f);
+		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AVOID FREEZE: ACTIVE");
+		DisplayY += 10.0f;
+	}
+
 	TextRender()->TextColor(1.0f, 1.0f, 1.0f, 1.0f);
 }
 
@@ -334,4 +415,19 @@ ColorRGBA CMyComponent::GetTargetColor(int ClientId, int DummyIdx) const
 	}
 
 	return ColorRGBA(0.0f, 0.0f, 0.0f, 0.0f);
+}
+
+bool CMyComponent::IsAvoidActive(int DummyIdx) const
+{
+	return m_aAvoidEnabled[DummyIdx];
+}
+
+int CMyComponent::GetAvoidDirection(int DummyIdx) const
+{
+	return m_aAvoidDirection[DummyIdx];
+}
+
+bool CMyComponent::GetAvoidJump(int DummyIdx) const
+{
+	return m_aAvoidJump[DummyIdx];
 }
