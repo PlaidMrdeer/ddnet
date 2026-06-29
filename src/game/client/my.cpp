@@ -1,6 +1,7 @@
 #include "my.h"
 #include <game/client/gameclient.h>
 #include <game/client/components/controls.h>
+#include <game/client/prediction/entities/character.h>
 #include <engine/graphics.h>
 #include <base/math.h>
 #include <base/vmath.h>
@@ -120,12 +121,12 @@ void CMyComponent::OnUpdate()
 			{
 				int StartTileX = round_to_int(LocalPos.x) / 32;
 				int TileY = round_to_int(LocalPos.y) / 32;
-				
+
 				bool OnGround = Collision()->IsOnGround(LocalPos, 28.0f);
 				float Friction = OnGround ? 0.5f : 0.95f;
 
 				float BrakeDistance = 0.0f;
-				if (std::abs(Vel.x) > 0.1f)
+				if(std::abs(Vel.x) > 0.1f)
 				{
 					BrakeDistance = (std::abs(Vel.x) * Friction) / (1.0f - Friction) + 14.0f;
 				}
@@ -276,6 +277,13 @@ void CMyComponent::OnUpdate()
 	float BestDistToMouse = std::numeric_limits<float>::max();
 	int BestId = -1;
 	vec2 MouseWorldPos = LocalPos + GameClient()->m_Controls.m_aMousePos[DummyIdx];
+	vec2 BestAimDir = AimDir;
+
+	CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
+	if(!pLocalChar)
+	{
+		return;
+	}
 
 	for(int i = 0; i < MAX_CLIENTS; i++)
 	{
@@ -296,27 +304,70 @@ void CMyComponent::OnUpdate()
 
 		vec2 TargetPos = GameClient()->m_aClients[i].m_RenderPos;
 		float Dist = distance(LocalPos, TargetPos);
-		if(Dist > HookLength)
+		if(Dist > HookLength + 28.0f || Dist < 0.001f)
 		{
 			continue;
 		}
 
-		vec2 TargetDir = TargetPos - LocalPos;
-		if(length(TargetDir) < 0.001f)
+		vec2 ToTarget = TargetPos - LocalPos;
+		vec2 DirToTarget = normalize(ToTarget);
+
+		float CosTheta = dot(AimDir, DirToTarget);
+		if(CosTheta < MinCos)
 		{
 			continue;
 		}
-		TargetDir = normalize(TargetDir);
 
-		float CosTheta = dot(AimDir, TargetDir);
-		if(CosTheta >= MinCos)
+		float DistToMouse = distance(TargetPos, MouseWorldPos);
+		if(DistToMouse >= BestDistToMouse)
 		{
-			float DistToMouse = distance(TargetPos, MouseWorldPos);
-			if(DistToMouse < BestDistToMouse)
+			continue;
+		}
+
+		float BaseAngle = angle(ToTarget);
+		float MaxAngle = std::asin(std::clamp(28.0f / Dist, 0.0f, 1.0f));
+
+		bool Hookable = false;
+		vec2 BestTargetAimDir = DirToTarget;
+		float BestTargetScore = std::numeric_limits<float>::max();
+
+		const int NUM_STEPS = 15;
+		for(int step = 0; step <= NUM_STEPS; step++)
+		{
+			float Offset = -MaxAngle + (MaxAngle * 2.0f * step / NUM_STEPS);
+			float TestAngle = BaseAngle + Offset;
+			vec2 TestAimDir = direction(TestAngle);
+
+			vec2 StartPos = LocalPos + TestAimDir * 42.0f;
+			vec2 EndPos = LocalPos + TestAimDir * HookLength;
+			vec2 HitPos;
+			int WallHit = Collision()->IntersectLineTeleHook(StartPos, EndPos, &HitPos, nullptr, nullptr);
+			vec2 RealEnd = WallHit ? HitPos : EndPos;
+
+			vec2 IntersectPos;
+			CCharacter *pHitChar = GameClient()->m_GameWorld.IntersectCharacter(LocalPos, RealEnd, 0.0f, IntersectPos, pLocalChar, LocalId);
+
+			if(pHitChar && pHitChar->GetCid() == i)
 			{
-				BestDistToMouse = DistToMouse;
-				BestId = i;
+				Hookable = true;
+				float AngleDiff = std::abs(angle(TestAimDir) - angle(AimDir));
+				while(AngleDiff > pi) AngleDiff -= 2.0f * pi;
+				while(AngleDiff < -pi) AngleDiff += 2.0f * pi;
+				AngleDiff = std::abs(AngleDiff);
+
+				if(AngleDiff < BestTargetScore)
+				{
+					BestTargetScore = AngleDiff;
+					BestTargetAimDir = TestAimDir;
+				}
 			}
+		}
+
+		if(Hookable)
+		{
+			BestDistToMouse = DistToMouse;
+			BestId = i;
+			BestAimDir = BestTargetAimDir;
 		}
 	}
 
@@ -326,14 +377,18 @@ void CMyComponent::OnUpdate()
 	bool PhysicalAimCanHook = false;
 	if(BestId != -1)
 	{
-		vec2 TargetPos = GameClient()->m_aClients[BestId].m_RenderPos;
-		vec2 ClosestPoint;
-		if(closest_point_on_line(LocalPos, LocalPos + AimDir * HookLength, TargetPos, ClosestPoint))
+		vec2 StartPos = LocalPos + AimDir * 42.0f;
+		vec2 EndPos = LocalPos + AimDir * HookLength;
+		vec2 HitPos;
+		int WallHit = Collision()->IntersectLineTeleHook(StartPos, EndPos, &HitPos, nullptr, nullptr);
+		vec2 RealEnd = WallHit ? HitPos : EndPos;
+
+		vec2 IntersectPos;
+		CCharacter *pHitChar = GameClient()->m_GameWorld.IntersectCharacter(LocalPos, RealEnd, 0.0f, IntersectPos, pLocalChar, LocalId);
+
+		if(pHitChar && pHitChar->GetCid() == BestId)
 		{
-			if(distance(TargetPos, ClosestPoint) < 28.0f)
-			{
-				PhysicalAimCanHook = true;
-			}
+			PhysicalAimCanHook = true;
 		}
 	}
 
@@ -341,6 +396,7 @@ void CMyComponent::OnUpdate()
 	{
 		m_aAimState[DummyIdx] = STATE_IDLE;
 		m_aHookOverride[DummyIdx] = false;
+		m_aCurrentAim[DummyIdx] = GameClient()->m_Controls.m_aMousePos[DummyIdx];
 	}
 	else
 	{
@@ -363,14 +419,13 @@ void CMyComponent::OnUpdate()
 			}
 			else
 			{
-				vec2 TargetDir = GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos - LocalPos;
 				float Jitter = GetJitterAngle(DummyIdx);
-				float TargetAngle = angle(TargetDir) + Jitter;
-				vec2 JitteredTarget = direction(TargetAngle) * length(TargetDir);
+				float TargetAngle = angle(BestAimDir) + Jitter;
+				vec2 JitteredTarget = direction(TargetAngle) * distance(LocalPos, GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos);
 
 				m_aCurrentAim[DummyIdx] = mix(m_aCurrentAim[DummyIdx], JitteredTarget, 0.22f);
 
-				if(dot(normalize(m_aCurrentAim[DummyIdx]), normalize(TargetDir)) > 0.992f)
+				if(dot(normalize(m_aCurrentAim[DummyIdx]), normalize(BestAimDir)) > 0.992f)
 				{
 					m_aAimState[DummyIdx] = STATE_HOOKING;
 				}
@@ -386,10 +441,9 @@ void CMyComponent::OnUpdate()
 			}
 			else
 			{
-				vec2 TargetDir = GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos - LocalPos;
 				float Jitter = GetJitterAngle(DummyIdx);
-				float TargetAngle = angle(TargetDir) + Jitter;
-				vec2 JitteredTarget = direction(TargetAngle) * length(TargetDir);
+				float TargetAngle = angle(BestAimDir) + Jitter;
+				vec2 JitteredTarget = direction(TargetAngle) * distance(LocalPos, GameClient()->m_aClients[m_aTargetId[DummyIdx]].m_RenderPos);
 
 				m_aCurrentAim[DummyIdx] = mix(m_aCurrentAim[DummyIdx], JitteredTarget, 0.35f);
 			}
