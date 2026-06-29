@@ -25,6 +25,7 @@ void CMyComponent::OnReset()
 		m_aAvoidEnabled[i] = false;
 		m_aAvoidDirection[i] = 0;
 		m_aAvoidActive[i] = false;
+		m_aAvoidTargetDirection[i] = 0;
 
 		m_aAutoHammerEnabled[i] = false;
 		m_aHammerOverride[i] = false;
@@ -119,8 +120,8 @@ void CMyComponent::OnUpdate()
 		int LocalId = GameClient()->m_Snap.m_LocalClientId;
 		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
 		{
-			vec2 LocalPos = GameClient()->m_aClients[LocalId].m_RenderPos;
-			vec2 Vel = GameClient()->m_aClients[LocalId].m_Predicted.m_Vel;
+			CCharacterCore StartCore = GameClient()->m_aClients[LocalId].m_Predicted;
+			CNetObj_PlayerInput CurrentInput = GameClient()->m_Controls.m_aInputData[DummyIdx];
 
 			int InputDir = 0;
 			if(GameClient()->m_Controls.m_aInputDirectionLeft[DummyIdx] && !GameClient()->m_Controls.m_aInputDirectionRight[DummyIdx])
@@ -128,134 +129,117 @@ void CMyComponent::OnUpdate()
 			else if(!GameClient()->m_Controls.m_aInputDirectionLeft[DummyIdx] && GameClient()->m_Controls.m_aInputDirectionRight[DummyIdx])
 				InputDir = 1;
 
-			int TravelDir = InputDir;
-			if(TravelDir == 0)
+			CurrentInput.m_Direction = InputDir;
+
+			bool OnGround = Collision()->IsOnGround(StartCore.m_Pos, 28.0f);
+
+			if(m_aAvoidTargetDirection[DummyIdx] != 0)
 			{
-				if(Vel.x > 0.5f)
-					TravelDir = 1;
-				else if(Vel.x < -0.5f)
-					TravelDir = -1;
+				if(CurrentInput.m_Direction != m_aAvoidTargetDirection[DummyIdx] || CurrentInput.m_Jump != 0 || !OnGround)
+				{
+					m_aAvoidTargetDirection[DummyIdx] = 0;
+				}
 			}
 
-			if(TravelDir != 0)
+			if(OnGround && CurrentInput.m_Jump == 0 && CurrentInput.m_Direction != 0)
 			{
-				int StartTileX = round_to_int(LocalPos.x) / 32;
-				int TileY = round_to_int(LocalPos.y) / 32;
-
-				bool OnGround = Collision()->IsOnGround(LocalPos, 28.0f);
-				float Friction = OnGround ? 0.5f : 0.95f;
-
-				float BrakeDistance = 0.0f;
-				if(std::abs(Vel.x) > 0.1f)
-				{
-					BrakeDistance = (std::abs(Vel.x) * Friction) / (1.0f - Friction) + 14.0f;
-				}
-
-				int ScanTiles = std::max(8, std::min(24, round_to_int(BrakeDistance / 32.0f) + 2));
-				int FreezeTileX = -1;
-
-				if(TravelDir == 1)
-				{
-					for(int tx = StartTileX + 1; tx <= StartTileX + ScanTiles; ++tx)
-					{
-						bool Found = false;
-						for(int ty = TileY - 1; ty <= TileY + 1; ++ty)
-						{
-							if(ty < 0 || ty >= Collision()->GetHeight())
-								continue;
-							int Index = ty * Collision()->GetWidth() + tx;
-							if(Index >= 0 && Index < Collision()->GetWidth() * Collision()->GetHeight())
-							{
-								int Tile = Collision()->GetTileIndex(Index);
-								int FTile = Collision()->GetFrontTileIndex(Index);
-								if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
-								   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
-								{
-									Found = true;
-									break;
-								}
-							}
-						}
-						if(Found)
-						{
-							FreezeTileX = tx;
-							break;
-						}
+				auto IsDanger = [&](vec2 Pos) {
+					float r = 14.0f;
+					vec2 CheckPoints[4] = {
+						Pos + vec2(-r, -r),
+						Pos + vec2(r, -r),
+						Pos + vec2(-r, r),
+						Pos + vec2(r, r)
+					};
+					for(auto p : CheckPoints) {
+						int Index = Collision()->GetPureMapIndex(p);
+						int Tile = Collision()->GetTileIndex(Index);
+						int FTile = Collision()->GetFrontTileIndex(Index);
+						if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
+						   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+							return true;
 					}
-				}
-				else if(TravelDir == -1)
+					return false;
+				};
+
+				if(m_aAvoidTargetDirection[DummyIdx] == 0)
 				{
-					for(int tx = StartTileX - 1; tx >= StartTileX - ScanTiles; --tx)
+					CWorldCore TempWorld;
+
+					bool PathCDanger = false;
+					CCharacterCore CoreC = StartCore;
+					CoreC.Init(&TempWorld, Collision());
+					for(int i = 0; i < 60; i++)
 					{
-						bool Found = false;
-						for(int ty = TileY - 1; ty <= TileY + 1; ++ty)
-						{
-							if(ty < 0 || ty >= Collision()->GetHeight())
-								continue;
-							int Index = ty * Collision()->GetWidth() + tx;
-							if(Index >= 0 && Index < Collision()->GetWidth() * Collision()->GetHeight())
-							{
-								int Tile = Collision()->GetTileIndex(Index);
-								int FTile = Collision()->GetFrontTileIndex(Index);
-								if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
-								   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
-								{
-									Found = true;
-									break;
-								}
-							}
-						}
-						if(Found)
-						{
-							FreezeTileX = tx;
-							break;
-						}
+						CoreC.m_Input = CurrentInput;
+						CoreC.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+						CoreC.Move();
+						CoreC.Quantize();
+						if(IsDanger(CoreC.m_Pos)) { PathCDanger = true; break; }
 					}
-				}
 
-				if(FreezeTileX != -1)
-				{
-					float TargetX = TravelDir == 1 ? (FreezeTileX * 32.0f) : ((FreezeTileX + 1) * 32.0f);
-					float DistToWater = TravelDir == 1 ? (TargetX - LocalPos.x) : (LocalPos.x - TargetX);
-					bool WillCross = false;
-
-					if(DistToWater <= BrakeDistance)
+					if(PathCDanger)
 					{
-						WillCross = true;
-					}
-					else
-					{
-						float SimX = LocalPos.x;
-						float SimVelX = Vel.x;
-
-						for(int step = 0; step < 30; ++step)
+						bool PathBDanger = false;
+						CCharacterCore CoreB = StartCore;
+						CoreB.Init(&TempWorld, Collision());
+						for(int i = 0; i < 60; i++)
 						{
-							SimVelX *= Friction;
-							SimX += SimVelX;
-							if(TravelDir == 1 && SimX >= TargetX - 14.0f)
+							CoreB.m_Input = CurrentInput;
+							if(i > 0)
 							{
-								WillCross = true;
-								break;
+								int BrakeDir = 0;
+								if(CoreB.m_Vel.x > 0.1f) BrakeDir = -1;
+								else if(CoreB.m_Vel.x < -0.1f) BrakeDir = 1;
+								CoreB.m_Input.m_Direction = BrakeDir;
 							}
-							if(TravelDir == -1 && SimX <= TargetX + 14.0f)
+							CoreB.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+							CoreB.Move();
+							CoreB.Quantize();
+							if(IsDanger(CoreB.m_Pos)) { PathBDanger = true; break; }
+							if(std::abs(CoreB.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreB.m_Pos, 28.0f)) break;
+						}
+
+						if(PathBDanger)
+						{
+							bool PathADanger = false;
+							CCharacterCore CoreA = StartCore;
+							CoreA.Init(&TempWorld, Collision());
+							for(int i = 0; i < 60; i++)
 							{
-								WillCross = true;
-								break;
+								int BrakeDir = 0;
+								if(CoreA.m_Vel.x > 0.1f) BrakeDir = -1;
+								else if(CoreA.m_Vel.x < -0.1f) BrakeDir = 1;
+								CoreA.m_Input = CurrentInput;
+								CoreA.m_Input.m_Direction = BrakeDir;
+								CoreA.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+								CoreA.Move();
+								CoreA.Quantize();
+								if(IsDanger(CoreA.m_Pos)) { PathADanger = true; break; }
+								if(std::abs(CoreA.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreA.m_Pos, 28.0f)) break;
+							}
+
+							if(!PathADanger)
+							{
+								m_aAvoidTargetDirection[DummyIdx] = CurrentInput.m_Direction;
 							}
 						}
 					}
-
-					if(WillCross)
-					{
-						m_aAvoidActive[DummyIdx] = true;
-						if(Vel.x > 0.1f)
-							m_aAvoidDirection[DummyIdx] = -1;
-						else if(Vel.x < -0.1f)
-							m_aAvoidDirection[DummyIdx] = 1;
-						else
-							m_aAvoidDirection[DummyIdx] = 0;
-					}
 				}
+
+				if(m_aAvoidTargetDirection[DummyIdx] != 0)
+				{
+					int BrakeDir = 0;
+					if(StartCore.m_Vel.x > 0.1f) BrakeDir = -1;
+					else if(StartCore.m_Vel.x < -0.1f) BrakeDir = 1;
+
+					m_aAvoidActive[DummyIdx] = true;
+					m_aAvoidDirection[DummyIdx] = BrakeDir;
+				}
+			}
+			else
+			{
+				m_aAvoidTargetDirection[DummyIdx] = 0;
 			}
 		}
 	}
