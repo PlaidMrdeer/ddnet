@@ -29,6 +29,7 @@ private:
 	bool m_aAvoidEnabled[NUM_DUMMIES];
 	int m_aAvoidDirection[NUM_DUMMIES];
 	bool m_aAvoidActive[NUM_DUMMIES];
+	int m_aAvoidTargetDirection[NUM_DUMMIES];
 
 	bool m_aAutoHammerEnabled[NUM_DUMMIES];
 	bool m_aHammerOverride[NUM_DUMMIES];
