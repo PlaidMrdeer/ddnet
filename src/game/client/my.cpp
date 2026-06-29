@@ -124,17 +124,12 @@ void CMyComponent::OnUpdate()
 				bool OnGround = Collision()->IsOnGround(LocalPos, 28.0f);
 				float Friction = OnGround ? 0.5f : 0.95f;
 
-				// 【精准计算核心 1】逆向推算当前速度下完全刹车所需的绝对距离 (像素)
-				// Teeworlds 物理模型中：X_next = X + Vel_x; Vel_x_next = Vel_x * Friction;
-				// 理论刹车总距离公式为：刹车像素 = |Vel.x| * Friction / (1.0f - Friction)
 				float BrakeDistance = 0.0f;
 				if (std::abs(Vel.x) > 0.1f)
 				{
-					// 额外附加一个半身宽的缓冲区(14.0f像素)，防止物理Tick采样误差导致边缘滑入
 					BrakeDistance = (std::abs(Vel.x) * Friction) / (1.0f - Friction) + 14.0f;
 				}
 
-				// 根据精确刹车距离动态计算需要扫描多少个 Tile，至少扫 8 个，至多扫 24 个（应对超高速）
 				int ScanTiles = std::max(8, std::min(24, round_to_int(BrakeDistance / 32.0f) + 2));
 				int FreezeTileX = -1;
 
@@ -199,19 +194,16 @@ void CMyComponent::OnUpdate()
 
 				if(FreezeTileX != -1)
 				{
-					// 计算到冻结/死亡水体边缘的绝对物理距离
 					float TargetX = TravelDir == 1 ? (FreezeTileX * 32.0f) : ((FreezeTileX + 1) * 32.0f);
 					float DistToWater = TravelDir == 1 ? (TargetX - LocalPos.x) : (LocalPos.x - TargetX);
 					bool WillCross = false;
 
-					// 【精准计算核心 2】当到水边缘的距离小于或等于预测出的刹车距离时，立刻判定需要急停
 					if(DistToWater <= BrakeDistance)
 					{
 						WillCross = true;
 					}
 					else
 					{
-						// 多层保障：通过多 Tick 仿真进一步验证极端惯性
 						float SimX = LocalPos.x;
 						float SimVelX = Vel.x;
 
@@ -235,7 +227,6 @@ void CMyComponent::OnUpdate()
 					if(WillCross)
 					{
 						m_aAvoidActive[DummyIdx] = true;
-						// 执行反向最高优先级输入以达到最大制动效果
 						if(Vel.x > 0.1f)
 							m_aAvoidDirection[DummyIdx] = -1;
 						else if(Vel.x < -0.1f)
@@ -306,13 +297,6 @@ void CMyComponent::OnUpdate()
 		vec2 TargetPos = GameClient()->m_aClients[i].m_RenderPos;
 		float Dist = distance(LocalPos, TargetPos);
 		if(Dist > HookLength)
-		{
-			continue;
-		}
-
-		vec2 ColPos;
-		vec2 NewPos;
-		if(Collision()->IntersectLine(LocalPos, TargetPos, &ColPos, &NewPos) != 0)
 		{
 			continue;
 		}
