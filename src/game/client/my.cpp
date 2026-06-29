@@ -25,6 +25,10 @@ void CMyComponent::OnReset()
 		m_aAvoidEnabled[i] = false;
 		m_aAvoidDirection[i] = 0;
 		m_aAvoidActive[i] = false;
+
+		m_aAutoHammerEnabled[i] = false;
+		m_aHammerOverride[i] = false;
+		m_aHammerTarget[i] = vec2(0.0f, 0.0f);
 	}
 }
 
@@ -36,6 +40,9 @@ void CMyComponent::OnConsoleInit()
 
 	Console()->Register("toggle_avoidfreeze", "", CFGFLAG_CLIENT, ConToggleAvoidFreeze, this, "Toggle Avoid Freeze");
 	Console()->Register("+avoidfreeze", "", CFGFLAG_CLIENT, ConKeyAvoidFreeze, this, "Hold Avoid Freeze");
+
+	Console()->Register("toggle_autohammer", "", CFGFLAG_CLIENT, ConToggleAutoHammer, this, "Toggle Auto Hammer");
+	Console()->Register("+autohammer", "", CFGFLAG_CLIENT, ConKeyAutoHammer, this, "Hold Auto Hammer");
 }
 
 void CMyComponent::ConToggleSilentAim(IConsole::IResult *pResult, void *pUserData)
@@ -68,6 +75,18 @@ void CMyComponent::ConKeyAvoidFreeze(IConsole::IResult *pResult, void *pUserData
 	pSelf->m_aAvoidEnabled[g_Config.m_ClDummy] = pResult->GetInteger(0) != 0;
 }
 
+void CMyComponent::ConToggleAutoHammer(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAutoHammerEnabled[g_Config.m_ClDummy] = !pSelf->m_aAutoHammerEnabled[g_Config.m_ClDummy];
+}
+
+void CMyComponent::ConKeyAutoHammer(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAutoHammerEnabled[g_Config.m_ClDummy] = pResult->GetInteger(0) != 0;
+}
+
 float CMyComponent::GetJitterAngle(int DummyIdx) const
 {
 	float Time = Client()->GlobalTime();
@@ -93,6 +112,7 @@ void CMyComponent::OnUpdate()
 
 	m_aAvoidDirection[DummyIdx] = 0;
 	m_aAvoidActive[DummyIdx] = false;
+	m_aHammerOverride[DummyIdx] = false;
 
 	if(m_aAvoidEnabled[DummyIdx])
 	{
@@ -234,6 +254,45 @@ void CMyComponent::OnUpdate()
 							m_aAvoidDirection[DummyIdx] = 1;
 						else
 							m_aAvoidDirection[DummyIdx] = 0;
+					}
+				}
+			}
+		}
+	}
+
+	if(m_aAutoHammerEnabled[DummyIdx])
+	{
+		int LocalId = GameClient()->m_Snap.m_LocalClientId;
+		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
+		{
+			// 使用预测坐标确保无延迟响应
+			vec2 LocalPos = GameClient()->m_aClients[LocalId].m_Predicted.m_Pos;
+			CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
+			if(pLocalChar && pLocalChar->GetActiveWeapon() == WEAPON_HAMMER)
+			{
+				for(int i = 0; i < MAX_CLIENTS; i++)
+				{
+					if(i == LocalId || !GameClient()->m_aClients[i].m_Active || !GameClient()->m_Snap.m_aCharacters[i].m_Active)
+						continue;
+
+					CCharacter *pTargetChar = GameClient()->m_GameWorld.GetCharacterById(i);
+					if(!pTargetChar || !pLocalChar->CanCollide(i))
+						continue;
+
+					vec2 TargetPos = GameClient()->m_aClients[i].m_Predicted.m_Pos;
+					if (length(TargetPos) < 1.0f) 
+						TargetPos = GameClient()->m_aClients[i].m_RenderPos;
+
+					float Dist = distance(LocalPos, TargetPos);
+
+					if(Dist < 62.9f)
+					{
+						m_aHammerOverride[DummyIdx] = true;
+						vec2 Dir = TargetPos - LocalPos;
+						if(length(Dir) < 0.001f)
+							Dir = vec2(1.0f, 0.0f);
+						m_aHammerTarget[DummyIdx] = normalize(Dir) * 100.0f;
+						break;
 					}
 				}
 			}
@@ -540,6 +599,13 @@ void CMyComponent::OnRender()
 	{
 		TextRender()->TextColor(0.0f, 0.8f, 1.0f, 1.0f);
 		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AVOID FREEZE: ACTIVE");
+		DisplayY += 10.0f;
+	}
+
+	if(m_aAutoHammerEnabled[DummyIdx])
+	{
+		TextRender()->TextColor(1.0f, 0.5f, 0.0f, 1.0f);
+		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AUTO HAMMER: ACTIVE");
 		DisplayY += 10.0f;
 	}
 
