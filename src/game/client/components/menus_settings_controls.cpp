@@ -98,6 +98,8 @@ void CMenusSettingsControls::OnInterfacesInit(CGameClient *pClient)
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Auto Aim"), "+silentaim"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Avoid Freeze"), "toggle_avoidfreeze"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Avoid Freeze"), "+avoidfreeze"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Auto Hammer"), "toggle_autohammer"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Auto Hammer"), "+autohammer"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Emoticon"), "+emote"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectator mode"), "+spectate"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectate next"), "spectate_next"},

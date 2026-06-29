@@ -1,3 +1,5 @@
+/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
+/* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "controls.h"
 
 #include <base/dbg.h>
@@ -246,6 +248,17 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[DummyIdx].m_TargetY = (int)SilentAimVec.y;
 			m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
 			m_aInputData[DummyIdx].m_Hook = GameClient()->m_MyComponent.GetHookOverride(DummyIdx) ? 1 : 0;
+		}
+
+		if(GameClient()->m_MyComponent.GetHammerOverride(DummyIdx))
+		{
+			vec2 HammerTarget = GameClient()->m_MyComponent.GetHammerTarget(DummyIdx);
+			m_aInputData[DummyIdx].m_TargetX = (int)HammerTarget.x;
+			m_aInputData[DummyIdx].m_TargetY = (int)HammerTarget.y;
+			m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+			
+			// Force fire every tick when in range
+			m_aInputData[DummyIdx].m_Fire = (m_aLastData[DummyIdx].m_Fire + 1) & INPUT_STATE_MASK;
 		}
 
 		if(!m_aInputData[g_Config.m_ClDummy].m_TargetX && !m_aInputData[g_Config.m_ClDummy].m_TargetY)

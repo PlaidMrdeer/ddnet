@@ -30,6 +30,10 @@ private:
 	int m_aAvoidDirection[NUM_DUMMIES];
 	bool m_aAvoidActive[NUM_DUMMIES];
 
+	bool m_aAutoHammerEnabled[NUM_DUMMIES];
+	bool m_aHammerOverride[NUM_DUMMIES];
+	vec2 m_aHammerTarget[NUM_DUMMIES];
+
 	float GetJitterAngle(int DummyIdx) const;
 
 	static void ConToggleSilentAim(IConsole::IResult *pResult, void *pUserData);
@@ -38,6 +42,9 @@ private:
 
 	static void ConToggleAvoidFreeze(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyAvoidFreeze(IConsole::IResult *pResult, void *pUserData);
+
+	static void ConToggleAutoHammer(IConsole::IResult *pResult, void *pUserData);
+	static void ConKeyAutoHammer(IConsole::IResult *pResult, void *pUserData);
 
 public:
 	int Sizeof() const override { return sizeof(*this); }
@@ -59,6 +66,10 @@ public:
 
 	bool IsAvoidActive(int DummyIdx) const;
 	int GetAvoidDirection(int DummyIdx) const;
+
+	bool IsAutoHammerEnabled(int DummyIdx) const { return m_aAutoHammerEnabled[DummyIdx]; }
+	bool GetHammerOverride(int DummyIdx) const { return m_aHammerOverride[DummyIdx]; }
+	vec2 GetHammerTarget(int DummyIdx) const { return m_aHammerTarget[DummyIdx]; }
 };
 
 #endif
