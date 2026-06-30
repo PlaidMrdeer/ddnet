@@ -249,7 +249,6 @@ void CMyComponent::OnUpdate()
 		int LocalId = GameClient()->m_Snap.m_LocalClientId;
 		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
 		{
-			// 使用预测坐标确保无延迟响应
 			vec2 LocalPos = GameClient()->m_aClients[LocalId].m_Predicted.m_Pos;
 			CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
 			if(pLocalChar && pLocalChar->GetActiveWeapon() == WEAPON_HAMMER)
@@ -335,7 +334,6 @@ void CMyComponent::OnUpdate()
 	}
 
 	bool LockedOn = (m_aAimState[DummyIdx] == STATE_AIMING_IN || m_aAimState[DummyIdx] == STATE_HOOKING);
-
 	if(LockedOn)
 	{
 		BestId = m_aTargetId[DummyIdx];
@@ -350,7 +348,74 @@ void CMyComponent::OnUpdate()
 			vec2 FuturePos = TargetPos + TargetVel * TicksToHit;
 			FuturePos.y += 0.5f * Gravity * TicksToHit * TicksToHit;
 
-			BestAimDir = normalize(FuturePos - LocalPos);
+			vec2 ToFutureTarget = FuturePos - LocalPos;
+			float FutureDist = length(ToFutureTarget);
+
+			float RelaxedMaxFov = HalfAngleRad * 1.15f;
+			float RelaxedMaxRange = HookLength + 40.0f;
+
+			vec2 DirToFutureTarget = normalize(ToFutureTarget);
+			float CosTheta = dot(AimDir, DirToFutureTarget);
+
+			bool StillValid = (FutureDist <= RelaxedMaxRange) && (CosTheta >= std::cos(RelaxedMaxFov));
+
+			if(StillValid)
+			{
+				bool Hookable = false;
+				vec2 BestTargetAimDir = DirToFutureTarget;
+				float BestTargetScore = std::numeric_limits<float>::max();
+
+				const int NUM_STEPS = 15;
+				float BaseAngle = angle(ToFutureTarget);
+				float MaxAngle = std::asin(std::clamp(30.0f / FutureDist, 0.0f, 1.0f));
+
+				for(int step = 0; step <= NUM_STEPS; step++)
+				{
+					float Offset = -MaxAngle + (MaxAngle * 2.0f * step / NUM_STEPS);
+					float TestAngle = BaseAngle + Offset;
+					vec2 TestAimDir = direction(TestAngle);
+
+					vec2 StartPos = LocalPos + TestAimDir * 42.0f;
+					vec2 EndPos = LocalPos + TestAimDir * HookLength;
+					vec2 HitPos;
+					int WallHit = Collision()->IntersectLineTeleHook(StartPos, EndPos, &HitPos, nullptr, nullptr);
+					vec2 RealEnd = WallHit ? HitPos : EndPos;
+
+					vec2 ClosestPoint;
+					if(closest_point_on_line(StartPos, RealEnd, FuturePos, ClosestPoint))
+					{
+						if(distance(FuturePos, ClosestPoint) < 30.0f)
+						{
+							Hookable = true;
+							float AngleDiff = std::abs(angle(TestAimDir) - angle(AimDir));
+							while(AngleDiff > pi) AngleDiff -= 2.0f * pi;
+							while(AngleDiff < -pi) AngleDiff += 2.0f * pi;
+							AngleDiff = std::abs(AngleDiff);
+
+							if(AngleDiff < BestTargetScore)
+							{
+								BestTargetScore = AngleDiff;
+								BestTargetAimDir = TestAimDir;
+							}
+						}
+					}
+				}
+
+				if(Hookable)
+				{
+					BestAimDir = BestTargetAimDir;
+				}
+				else
+				{
+					StillValid = false;
+				}
+			}
+
+			if(!StillValid)
+			{
+				BestId = -1;
+				LockedOn = false;
+			}
 		}
 		else
 		{
@@ -390,7 +455,7 @@ void CMyComponent::OnUpdate()
 			vec2 ToFutureTarget = FuturePos - LocalPos;
 			float FutureDist = length(ToFutureTarget);
 
-			if(FutureDist > HookLength + 28.0f || FutureDist < 0.001f)
+			if(FutureDist > HookLength + 30.0f || FutureDist < 0.001f)
 			{
 				continue;
 			}
@@ -410,7 +475,7 @@ void CMyComponent::OnUpdate()
 			}
 
 			float BaseAngle = angle(ToFutureTarget);
-			float MaxAngle = std::asin(std::clamp(28.0f / FutureDist, 0.0f, 1.0f));
+			float MaxAngle = std::asin(std::clamp(30.0f / FutureDist, 0.0f, 1.0f));
 
 			bool Hookable = false;
 			vec2 BestTargetAimDir = DirToFutureTarget;
@@ -423,16 +488,16 @@ void CMyComponent::OnUpdate()
 				float TestAngle = BaseAngle + Offset;
 				vec2 TestAimDir = direction(TestAngle);
 
-				vec2 ClosestPoint;
-				closest_point_on_line(LocalPos, LocalPos + TestAimDir * HookLength, FuturePos, ClosestPoint);
+				vec2 StartPos = LocalPos + TestAimDir * 42.0f;
+				vec2 EndPos = LocalPos + TestAimDir * HookLength;
+				vec2 HitPos;
+				int WallHit = Collision()->IntersectLineTeleHook(StartPos, EndPos, &HitPos, nullptr, nullptr);
+				vec2 RealEnd = WallHit ? HitPos : EndPos;
 
-				if(distance(FuturePos, ClosestPoint) < 28.0f)
+				vec2 ClosestPoint;
+				if(closest_point_on_line(StartPos, RealEnd, FuturePos, ClosestPoint))
 				{
-					vec2 StartPos = LocalPos + TestAimDir * 42.0f;
-					vec2 HitPos;
-					int WallHit = Collision()->IntersectLineTeleHook(StartPos, ClosestPoint, &HitPos, nullptr, nullptr);
-					
-					if(!WallHit)
+					if(distance(FuturePos, ClosestPoint) < 30.0f)
 					{
 						Hookable = true;
 						float AngleDiff = std::abs(angle(TestAimDir) - angle(AimDir));
@@ -470,12 +535,13 @@ void CMyComponent::OnUpdate()
 		int WallHit = Collision()->IntersectLineTeleHook(StartPos, EndPos, &HitPos, nullptr, nullptr);
 		vec2 RealEnd = WallHit ? HitPos : EndPos;
 
-		vec2 IntersectPos;
-		CCharacter *pHitChar = GameClient()->m_GameWorld.IntersectCharacter(LocalPos, RealEnd, 0.0f, IntersectPos, pLocalChar, LocalId);
-
-		if(pHitChar && pHitChar->GetCid() == BestId)
+		vec2 ClosestPoint;
+		if(closest_point_on_line(StartPos, RealEnd, GameClient()->m_aClients[BestId].m_RenderPos, ClosestPoint))
 		{
-			PhysicalAimCanHook = true;
+			if(distance(GameClient()->m_aClients[BestId].m_RenderPos, ClosestPoint) < 30.0f)
+			{
+				PhysicalAimCanHook = true;
+			}
 		}
 	}
 
@@ -581,8 +647,8 @@ void CMyComponent::OnRender()
 
 	if(m_aAvoidEnabled[DummyIdx])
 	{
-		TextRender()->TextColor(0.0f, 0.8f, 1.0f, 1.0f);
-		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AVOID FREEZE: ACTIVE");
+		TextRender()->TextColor(0.0f, 1.0f, 0.0f, 1.0f);
+		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AUTO AVOID: ACTIVE");
 		DisplayY += 10.0f;
 	}
 
