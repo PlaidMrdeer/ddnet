@@ -307,10 +307,17 @@ void CMyComponent::OnUpdate()
 	float HookLength = GameClient()->m_aTuning[DummyIdx].m_HookLength;
 	if(HookLength < 1.0f) HookLength = 380.0f;
 	float HookSpeed = GameClient()->m_aTuning[DummyIdx].m_HookFireSpeed;
-	if(HookSpeed <= 0.0f) HookSpeed = 80.0f;
+	if(HookSpeed <= 0.0f)
+		HookSpeed = 80.0f;
+	float Gravity = GameClient()->m_aTuning[DummyIdx].m_Gravity;
 
 	float HalfAngleRad = (m_aFov[DummyIdx] / 2.0f) * (pi / 180.0f);
 	float MinCos = std::cos(HalfAngleRad);
+
+	float BestDistToMouse = std::numeric_limits<float>::max();
+	int BestId = -1;
+	vec2 MouseWorldPos = LocalPos + GameClient()->m_Controls.m_aMousePos[DummyIdx];
+	vec2 BestAimDir = AimDir;
 
 	int CurrentHooked = pLocalChar->Core()->HookedPlayer();
 	bool RetainLock = false;
@@ -333,18 +340,75 @@ void CMyComponent::OnUpdate()
 		}
 	}
 
-	int BestId = -1;
-	vec2 BestAimPos = vec2(0.0f, 0.0f);
-
 	if (RetainLock)
 	{
 		BestId = m_aTargetId[DummyIdx];
-		BestAimPos = GameClient()->m_aClients[BestId].m_RenderPos;
+		vec2 TargetPos = GameClient()->m_aClients[BestId].m_RenderPos;
+		vec2 TargetVel = GameClient()->m_aClients[BestId].m_Predicted.m_Vel;
+
+		float DistToTarget = distance(LocalPos, TargetPos);
+		float TicksToHit = DistToTarget / HookSpeed;
+		vec2 FuturePos = TargetPos + TargetVel * TicksToHit;
+		FuturePos.y += 0.5f * Gravity * TicksToHit * TicksToHit;
+
+		vec2 ToFutureTarget = FuturePos - LocalPos;
+		float FutureDist = length(ToFutureTarget);
+
+		bool Hookable = false;
+		vec2 BestTargetAimDir = AimDir;
+
+		if (CurrentHooked == BestId)
+		{
+			Hookable = true;
+			BestTargetAimDir = normalize(TargetPos - LocalPos);
+		}
+		else if (FutureDist <= HookLength + 4.0f)
+		{
+			float HalfSpan = std::asin(std::clamp(28.0f / FutureDist, 0.0f, 1.0f));
+			float AngleCenter = angle(ToFutureTarget);
+			float BestTargetScore = std::numeric_limits<float>::max();
+
+			const int NUM_SAMPLES = 9;
+			for (int step = 0; step < NUM_SAMPLES; ++step)
+			{
+				float t_ratio = -1.0f + (2.0f * step) / (NUM_SAMPLES - 1);
+				float OffsetAngle = t_ratio * HalfSpan;
+				float TestAngle = AngleCenter + OffsetAngle;
+				vec2 TestDir = direction(TestAngle);
+
+				float CosOffset = std::cos(OffsetAngle);
+				float SinOffset = std::sin(OffsetAngle);
+				float DistToCircleEntry = FutureDist * CosOffset - std::sqrt(std::max(0.0f, 28.0f * 28.0f - FutureDist * FutureDist * SinOffset * SinOffset));
+
+				vec2 HitPos;
+				int WallHit = Collision()->IntersectLineTeleHook(LocalPos + TestDir * 42.0f, LocalPos + TestDir * DistToCircleEntry, &HitPos, nullptr, nullptr);
+
+				if (!WallHit || distance(LocalPos, HitPos) >= DistToCircleEntry)
+				{
+					Hookable = true;
+					float CosWithCrosshair = dot(AimDir, TestDir);
+					float AngleDiff = std::acos(std::clamp(CosWithCrosshair, -1.0f, 1.0f));
+
+					if (AngleDiff < BestTargetScore)
+					{
+						BestTargetScore = AngleDiff;
+						BestTargetAimDir = TestDir;
+					}
+				}
+			}
+		}
+
+		if (Hookable)
+		{
+			BestAimDir = BestTargetAimDir;
+		}
+		else
+		{
+			BestId = -1;
+		}
 	}
 	else
 	{
-		float BestScore = std::numeric_limits<float>::max();
-
 		for (int i = 0; i < MAX_CLIENTS; i++)
 		{
 			if (i == LocalId) continue;
@@ -386,31 +450,65 @@ void CMyComponent::OnUpdate()
 			vec2 PredictedPos = TargetPos + TargetVel * t;
 			float DistToPredicted = distance(LocalPos, PredictedPos);
 
-			if (DistToPredicted > HookLength) continue;
+			if (DistToPredicted > HookLength + 4.0f) continue;
 
 			vec2 DirToPredicted = normalize(PredictedPos - LocalPos);
 			float CosTheta = dot(AimDir, DirToPredicted);
 			if (CosTheta < MinCos) continue;
 
-			bool PathClear = true;
-			if (DistToPredicted > 42.0f)
+			bool Hookable = false;
+			vec2 BestTargetAimDir = DirToPredicted;
+			float BestTargetScore = std::numeric_limits<float>::max();
+
+			if (DistToPredicted <= 28.0f)
 			{
-				vec2 HitPos;
-				int WallHit = Collision()->IntersectLineTeleHook(LocalPos + DirToPredicted * 42.0f, LocalPos + DirToPredicted * DistToPredicted, &HitPos, nullptr, nullptr);
-				if (WallHit)
+				Hookable = true;
+				BestTargetAimDir = DirToPredicted;
+			}
+			else
+			{
+				float HalfSpan = std::asin(std::clamp(28.0f / DistToPredicted, 0.0f, 1.0f));
+				float AngleCenter = angle(PredictedPos - LocalPos);
+
+				const int NUM_SAMPLES = 9;
+				for (int step = 0; step < NUM_SAMPLES; ++step)
 				{
-					PathClear = false;
+					float t_ratio = -1.0f + (2.0f * step) / (NUM_SAMPLES - 1);
+					float OffsetAngle = t_ratio * HalfSpan;
+					float TestAngle = AngleCenter + OffsetAngle;
+					vec2 TestDir = direction(TestAngle);
+
+					float CosOffset = std::cos(OffsetAngle);
+					float SinOffset = std::sin(OffsetAngle);
+					float DistToCircleEntry = DistToPredicted * CosOffset - std::sqrt(std::max(0.0f, 28.0f * 28.0f - DistToPredicted * DistToPredicted * SinOffset * SinOffset));
+
+					vec2 HitPos;
+					int WallHit = Collision()->IntersectLineTeleHook(LocalPos + TestDir * 42.0f, LocalPos + TestDir * DistToCircleEntry, &HitPos, nullptr, nullptr);
+
+					if (!WallHit || distance(LocalPos, HitPos) >= DistToCircleEntry)
+					{
+						Hookable = true;
+						float CosWithCrosshair = dot(AimDir, TestDir);
+						float AngleDiff = std::acos(std::clamp(CosWithCrosshair, -1.0f, 1.0f));
+
+						if (AngleDiff < BestTargetScore)
+						{
+							BestTargetScore = AngleDiff;
+							BestTargetAimDir = TestDir;
+						}
+					}
 				}
 			}
 
-			if (!PathClear) continue;
-
-			float AngleDiff = std::acos(std::clamp(CosTheta, -1.0f, 1.0f));
-			if (AngleDiff < BestScore)
+			if (Hookable)
 			{
-				BestScore = AngleDiff;
-				BestId = i;
-				BestAimPos = PredictedPos;
+				float DistToMouse = distance(PredictedPos, MouseWorldPos);
+				if (DistToMouse < BestDistToMouse)
+				{
+					BestDistToMouse = DistToMouse;
+					BestId = i;
+					BestAimDir = BestTargetAimDir;
+				}
 			}
 		}
 	}
@@ -418,7 +516,9 @@ void CMyComponent::OnUpdate()
 	if (BestId != -1)
 	{
 		m_aTargetId[DummyIdx] = BestId;
-		vec2 TargetVec = BestAimPos - LocalPos;
+		float CurrentLen = length(m_aCurrentAim[DummyIdx]);
+		if (CurrentLen < 0.001f) CurrentLen = 200.0f;
+		vec2 TargetVec = BestAimDir * CurrentLen;
 		bool UserWantsHook = GameClient()->m_Controls.m_aInputData[DummyIdx].m_Hook;
 
 		if (UserWantsHook)
