@@ -327,15 +327,21 @@ void CMyComponent::OnUpdate()
 		int PrevTargetId = m_aTargetId[DummyIdx];
 		if (GameClient()->m_aClients[PrevTargetId].m_Active && GameClient()->m_Snap.m_aCharacters[PrevTargetId].m_Active)
 		{
-			if (CurrentHooked == PrevTargetId)
+			vec2 TargetPos = GameClient()->m_aClients[PrevTargetId].m_RenderPos;
+			vec2 ToTarget = normalize(TargetPos - LocalPos);
+			float CosTheta = dot(AimDir, ToTarget);
+			if (CosTheta >= MinCos)
 			{
-				RetainLock = true;
-			}
-			else if (GameClient()->m_Controls.m_aInputData[DummyIdx].m_Hook && 
-					 (m_aAimState[DummyIdx] == STATE_HOOKING || m_aAimState[DummyIdx] == STATE_AIMING_IN) &&
-					 pLocalChar->Core()->m_HookState != HOOK_RETRACTED && pLocalChar->Core()->m_HookState != HOOK_IDLE)
-			{
-				RetainLock = true;
+				if (CurrentHooked == PrevTargetId)
+				{
+					RetainLock = true;
+				}
+				else if (GameClient()->m_Controls.m_aInputData[DummyIdx].m_Hook && 
+						 (m_aAimState[DummyIdx] == STATE_HOOKING || m_aAimState[DummyIdx] == STATE_AIMING_IN) &&
+						 pLocalChar->Core()->m_HookState != HOOK_RETRACTED && pLocalChar->Core()->m_HookState != HOOK_IDLE)
+				{
+					RetainLock = true;
+				}
 			}
 		}
 	}
@@ -345,10 +351,16 @@ void CMyComponent::OnUpdate()
 		BestId = m_aTargetId[DummyIdx];
 		vec2 TargetPos = GameClient()->m_aClients[BestId].m_RenderPos;
 		vec2 TargetVel = GameClient()->m_aClients[BestId].m_Predicted.m_Vel;
+		vec2 PrevTargetVel = GameClient()->m_aClients[BestId].m_PrevPredicted.m_Vel;
 
 		float DistToTarget = distance(LocalPos, TargetPos);
 		float TicksToHit = DistToTarget / HookSpeed;
-		vec2 FuturePos = TargetPos + TargetVel * TicksToHit;
+
+		vec2 SmoothedVel = (PrevTargetVel + TargetVel) * 0.5f;
+		float decay = 0.92f;
+		float time_factor = (1.0f - std::pow(decay, TicksToHit)) / (1.0f - decay);
+
+		vec2 FuturePos = TargetPos + SmoothedVel * time_factor;
 		FuturePos.y += 0.5f * Gravity * TicksToHit * TicksToHit;
 
 		vec2 ToFutureTarget = FuturePos - LocalPos;
@@ -417,10 +429,13 @@ void CMyComponent::OnUpdate()
 
 			vec2 TargetPos = GameClient()->m_aClients[i].m_RenderPos;
 			vec2 TargetVel = GameClient()->m_aClients[i].m_Predicted.m_Vel;
+			vec2 PrevTargetVel = GameClient()->m_aClients[i].m_PrevPredicted.m_Vel;
+
+			vec2 SmoothedVel = (PrevTargetVel + TargetVel) * 0.5f;
 
 			vec2 D = TargetPos - LocalPos;
-			float a = dot(TargetVel, TargetVel) - HookSpeed * HookSpeed;
-			float b = 2.0f * dot(D, TargetVel);
+			float a = dot(SmoothedVel, SmoothedVel) - HookSpeed * HookSpeed;
+			float b = 2.0f * dot(D, SmoothedVel);
 			float c = dot(D, D);
 
 			float t = -1.0f;
@@ -447,7 +462,12 @@ void CMyComponent::OnUpdate()
 				t = distance(LocalPos, TargetPos) / HookSpeed;
 			}
 
-			vec2 PredictedPos = TargetPos + TargetVel * t;
+			float decay = 0.92f;
+			float time_factor = (1.0f - std::pow(decay, t)) / (1.0f - decay);
+
+			vec2 PredictedPos = TargetPos + SmoothedVel * time_factor;
+			PredictedPos.y += 0.5f * Gravity * t * t;
+
 			float DistToPredicted = distance(LocalPos, PredictedPos);
 
 			if (DistToPredicted > HookLength + 4.0f) continue;
