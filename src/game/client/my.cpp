@@ -428,64 +428,57 @@ void CMyComponent::OnUpdate()
 
 			float DistToPredicted = distance(LocalPos, PredictedPos);
 
-			if(DistToPredicted > HookLength + 4.0f) continue;
+			if(DistToPredicted > HookLength + 28.0f) continue;
 
 			vec2 DirToPredicted = normalize(PredictedPos - LocalPos);
 			float CosTheta = dot(AimDir, DirToPredicted);
-			if(CosTheta < MinCos) continue;
+			if(CosTheta < MinCos && DistToPredicted > 42.0f) continue;
 
 			bool Hookable = false;
 			vec2 BestTargetAimDir = DirToPredicted;
-			float BestTargetScore = std::numeric_limits<float>::max();
+			float BestTargetScore = -1.0f;
 
-			if(DistToPredicted <= 42.0f)
-			{
-				Hookable = true;
-				BestTargetAimDir = DirToPredicted;
-			}
-			else
-			{
-				float HalfSpan = std::asin(std::clamp(28.0f / DistToPredicted, 0.0f, 1.0f));
-				float AngleCenter = angle(PredictedPos - LocalPos);
+			float HalfSpan = std::asin(std::clamp(28.0f / DistToPredicted, 0.0f, 1.0f));
+			float AngleCenter = angle(PredictedPos - LocalPos);
 
-				const int NUM_SAMPLES = 9;
-				for(int step = 0; step < NUM_SAMPLES; ++step)
+			const int NUM_SAMPLES = 61;
+			for(int step = 0; step < NUM_SAMPLES; ++step)
+			{
+				float t_ratio = -1.0f + (2.0f * step) / (NUM_SAMPLES - 1);
+				float OffsetAngle = t_ratio * HalfSpan;
+				float TestAngle = AngleCenter + OffsetAngle;
+				vec2 TestDir = direction(TestAngle);
+
+				vec2 StartPos = LocalPos + TestDir * 42.0f;
+				vec2 v = StartPos - PredictedPos;
+				float b_ray = dot(v, TestDir);
+				float c_ray = dot(v, v) - 28.0f * 28.0f;
+				float D_ray = b_ray * b_ray - c_ray;
+
+				if(D_ray >= 0.0f)
 				{
-					float t_ratio = -1.0f + (2.0f * step) / (NUM_SAMPLES - 1);
-					float OffsetAngle = t_ratio * HalfSpan;
-					float TestAngle = AngleCenter + OffsetAngle;
-					vec2 TestDir = direction(TestAngle);
+					float t1_ray = -b_ray - std::sqrt(D_ray);
+					float t2_ray = -b_ray + std::sqrt(D_ray);
 
-					float CosOffset = std::cos(OffsetAngle);
-					float SinOffset = std::sin(OffsetAngle);
-					float DistToCircleEntry = DistToPredicted * CosOffset - std::sqrt(std::max(0.0f, 28.0f * 28.0f - DistToPredicted * DistToPredicted * SinOffset * SinOffset));
-
-					if(DistToCircleEntry <= 42.0f)
+					float t_entry = t1_ray;
+					if(t1_ray < 0.0f && t2_ray > 0.0f)
 					{
-						Hookable = true;
-						float CosWithCrosshair = dot(AimDir, TestDir);
-						float AngleDiff = std::acos(std::clamp(CosWithCrosshair, -1.0f, 1.0f));
-
-						if(AngleDiff < BestTargetScore)
-						{
-							BestTargetScore = AngleDiff;
-							BestTargetAimDir = TestDir;
-						}
+						t_entry = 0.0f;
 					}
-					else
+
+					if(t_entry >= 0.0f && t_entry <= (HookLength - 42.0f))
 					{
 						vec2 HitPos;
-						int WallHit = Collision()->IntersectLineTeleHook(LocalPos + TestDir * 42.0f, LocalPos + TestDir * DistToCircleEntry, &HitPos, nullptr, nullptr);
+						int WallHit = Collision()->IntersectLineTeleHook(StartPos, StartPos + TestDir * t_entry, &HitPos, nullptr, nullptr);
 
-						if(!WallHit || distance(LocalPos, HitPos) >= DistToCircleEntry)
+						if(!WallHit)
 						{
 							Hookable = true;
-							float CosWithCrosshair = dot(AimDir, TestDir);
-							float AngleDiff = std::acos(std::clamp(CosWithCrosshair, -1.0f, 1.0f));
+							float Score = dot(AimDir, TestDir);
 
-							if(AngleDiff < BestTargetScore)
+							if(Score > BestTargetScore)
 							{
-								BestTargetScore = AngleDiff;
+								BestTargetScore = Score;
 								BestTargetAimDir = TestDir;
 							}
 						}
