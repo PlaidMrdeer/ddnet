@@ -1,5 +1,3 @@
-/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
-/* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "controls.h"
 
 #include <base/dbg.h>
@@ -256,8 +254,17 @@ int CControls::SnapInput(int *pData)
 			m_aInputData[DummyIdx].m_TargetX = (int)HammerTarget.x;
 			m_aInputData[DummyIdx].m_TargetY = (int)HammerTarget.y;
 			m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
-			
-			// Force fire every tick when in range
+
+			m_aInputData[DummyIdx].m_Fire = (m_aLastData[DummyIdx].m_Fire + 1) & INPUT_STATE_MASK;
+		}
+
+		if(GameClient()->m_MyComponent.GetLaserOverride(DummyIdx))
+		{
+			vec2 LaserTarget = GameClient()->m_MyComponent.GetLaserTarget(DummyIdx);
+			m_aInputData[DummyIdx].m_TargetX = (int)LaserTarget.x;
+			m_aInputData[DummyIdx].m_TargetY = (int)LaserTarget.y;
+			m_aInputData[DummyIdx].m_PlayerFlags |= PLAYERFLAG_INPUT_ABSOLUTE;
+
 			m_aInputData[DummyIdx].m_Fire = (m_aLastData[DummyIdx].m_Fire + 1) & INPUT_STATE_MASK;
 		}
 

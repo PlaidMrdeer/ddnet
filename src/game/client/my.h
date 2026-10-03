@@ -35,6 +35,10 @@ private:
 	bool m_aHammerOverride[NUM_DUMMIES];
 	vec2 m_aHammerTarget[NUM_DUMMIES];
 
+	bool m_aAutoLaserEnabled[NUM_DUMMIES];
+	bool m_aLaserOverride[NUM_DUMMIES];
+	vec2 m_aLaserTarget[NUM_DUMMIES];
+
 	float GetJitterAngle(int DummyIdx) const;
 
 	static void ConToggleSilentAim(IConsole::IResult *pResult, void *pUserData);
@@ -46,6 +50,31 @@ private:
 
 	static void ConToggleAutoHammer(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyAutoHammer(IConsole::IResult *pResult, void *pUserData);
+
+	static void ConToggleAutoLaser(IConsole::IResult *pResult, void *pUserData);
+	static void ConKeyAutoLaser(IConsole::IResult *pResult, void *pUserData);
+
+	bool SimulateLaser(
+		int ShooterId,
+		vec2 From,
+		vec2 Dir,
+		float Energy,
+		float BounceCost,
+		int MaxBounces,
+		int TargetId,
+		vec2 TargetPos,
+		float TargetRadius,
+		vec2 *pOutHitPos);
+
+	bool FindLaserTrajectory(
+		int ShooterId,
+		vec2 ShooterPos,
+		int TargetId,
+		vec2 TargetPos,
+		vec2 TargetVel,
+		bool TargetOnGround,
+		int DummyIdx,
+		vec2 &OutDir);
 
 public:
 	int Sizeof() const override { return sizeof(*this); }
@@ -71,6 +100,10 @@ public:
 	bool IsAutoHammerEnabled(int DummyIdx) const { return m_aAutoHammerEnabled[DummyIdx]; }
 	bool GetHammerOverride(int DummyIdx) const { return m_aHammerOverride[DummyIdx]; }
 	vec2 GetHammerTarget(int DummyIdx) const { return m_aHammerTarget[DummyIdx]; }
+
+	bool IsAutoLaserEnabled(int DummyIdx) const { return m_aAutoLaserEnabled[DummyIdx]; }
+	bool GetLaserOverride(int DummyIdx) const { return m_aLaserOverride[DummyIdx]; }
+	vec2 GetLaserTarget(int DummyIdx) const { return m_aLaserTarget[DummyIdx]; }
 };
 
 #endif

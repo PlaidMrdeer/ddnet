@@ -1,5 +1,3 @@
-/* (c) Magnus Auvinen. See licence.txt in the root of the distribution for more information. */
-/* If you are missing that file, acquire a complete release at teeworlds.com.                */
 #include "menus_settings_controls.h"
 
 #include <base/str.h>
@@ -100,6 +98,8 @@ void CMenusSettingsControls::OnInterfacesInit(CGameClient *pClient)
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Avoid Freeze"), "+avoidfreeze"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Auto Hammer"), "toggle_autohammer"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Auto Hammer"), "+autohammer"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Toggle Auto Laser"), "toggle_autolaser"},
+		{EBindOptionGroup::MISCELLANEOUS, Localizable("Hold Auto Laser"), "+autolaser"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Emoticon"), "+emote"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectator mode"), "+spectate"},
 		{EBindOptionGroup::MISCELLANEOUS, Localizable("Spectate next"), "spectate_next"},
@@ -134,7 +134,6 @@ void CMenusSettingsControls::Render(CUIRect MainView)
 	QuickSearch.VSplitRight(MARGIN, &QuickSearch, nullptr);
 	MainView.HSplitBottom(MARGIN, &MainView, nullptr);
 
-	// Quick search
 	if(Ui()->DoEditBox_Search(&m_FilterInput, &QuickSearch, FONT_SIZE, !Ui()->IsPopupOpen() && !GameClient()->m_GameConsole.IsActive() && !GameClient()->m_KeyBinder.IsActive()))
 	{
 		m_CurrentSearchMatch = 0;
@@ -170,7 +169,6 @@ void CMenusSettingsControls::Render(CUIRect MainView)
 		}
 	}
 
-	// Reset to default button
 	if(GameClient()->m_Menus.DoButton_Menu(&m_ResetToDefaultButton, Localize("Reset to defaults"), 0, &ResetToDefault))
 	{
 		GameClient()->m_Menus.PopupConfirm(Localize("Reset controls"), Localize("Are you sure that you want to reset the controls to their defaults?"),
@@ -185,7 +183,6 @@ void CMenusSettingsControls::Render(CUIRect MainView)
 	CUIRect LeftColumn, RightColumn;
 	MainView.VSplitMid(&LeftColumn, &RightColumn, MARGIN);
 
-	// Left column
 	RenderSettingsBlock(MeasureSettingsMouseHeight(), &LeftColumn,
 		Localize("Mouse"), nullptr, nullptr, std::bind_front(&CMenusSettingsControls::RenderSettingsMouse, this));
 	RenderSettingsBlock(MeasureSettingsJoystickHeight(), &LeftColumn,
@@ -193,7 +190,6 @@ void CMenusSettingsControls::Render(CUIRect MainView)
 	RenderSettingsBindsBlock(EBindOptionGroup::MOVEMENT, &LeftColumn, Localize("Movement"));
 	RenderSettingsBindsBlock(EBindOptionGroup::WEAPON, &LeftColumn, Localize("Weapon"));
 
-	// Right column
 	RenderSettingsBindsBlock(EBindOptionGroup::VOTING, &RightColumn, Localize("Voting"));
 	RenderSettingsBindsBlock(EBindOptionGroup::CHAT, &RightColumn, Localize("Chat"));
 	RenderSettingsBindsBlock(EBindOptionGroup::DUMMY, &RightColumn, Localize("Dummy"));
@@ -235,7 +231,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 			});
 			if(ExistingOption == m_vBindOptions.end())
 			{
-				// Bind option not found for command, add custom bind option.
 				CBindOption NewOption = {EBindOptionGroup::CUSTOM, nullptr, pBind};
 				ExistingOption = m_vBindOptions.insert(
 					std::upper_bound(m_vBindOptions.begin() + m_NumPredefinedBindOptions, m_vBindOptions.end(), NewOption, [&](const CBindOption &Option1, const CBindOption &Option2) {
@@ -243,7 +238,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 					}),
 					NewOption);
 
-				// Update search matches due to new option being added.
 				if(!m_FilterInput.IsEmpty())
 				{
 					const int OptionIndex = ExistingOption - m_vBindOptions.begin();
@@ -267,7 +261,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 			auto ExistingBindSlot = ExistingOption->GetBindSlotElement(BindSlot);
 			if(ExistingBindSlot == ExistingOption->m_vCurrentBinds.end())
 			{
-				// Remove empty bind slot if one is present because it will be replaced with a bind slot for the new bind.
 				auto ExistingEmptyBindSlot = ExistingOption->GetBindSlotElement(EMPTY_BIND_SLOT);
 				if(ExistingEmptyBindSlot != ExistingOption->m_vCurrentBinds.end())
 				{
@@ -286,8 +279,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 		}
 	}
 
-	// Remove bind slots that are not bound anymore,
-	// mark unused custom bind options for removal.
 	for(CBindOption &Option : m_vBindOptions)
 	{
 		Option.m_vCurrentBinds.erase(std::remove_if(Option.m_vCurrentBinds.begin(), Option.m_vCurrentBinds.end(),
@@ -307,7 +298,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 		}
 	}
 
-	// Update search matches when removing bind options.
 	for(const CBindOption &Option : m_vBindOptions)
 	{
 		if(!Option.m_ToBeDeleted)
@@ -341,7 +331,6 @@ void CMenusSettingsControls::UpdateBindOptions()
 		m_CurrentSearchMatch = m_vSearchMatches.size() - 1;
 	}
 
-	// Remove unused bind options.
 	m_vBindOptions.erase(std::remove_if(m_vBindOptions.begin() + m_NumPredefinedBindOptions, m_vBindOptions.end(),
 				     [&](const CBindOption &Option) { return Option.m_ToBeDeleted; }),
 		m_vBindOptions.end());
@@ -379,9 +368,9 @@ void CMenusSettingsControls::RenderSettingsBlock(float Height, CUIRect *pParentR
 	bool *pExpanded, CButtonContainer *pExpandButton, const std::function<void(CUIRect Rect)> &RenderContentFunction)
 {
 	const bool WasExpanded = pExpanded == nullptr || *pExpanded;
-	float FullHeight = WasExpanded ? Height : 0.0f; // Content
-	FullHeight += pTitle == nullptr ? 0.0f : HEADER_FONT_SIZE + (WasExpanded ? MARGIN : 0.0f); // Title and spacing
-	FullHeight += 2.0f * MARGIN; // Margin
+	float FullHeight = WasExpanded ? Height : 0.0f;
+	FullHeight += pTitle == nullptr ? 0.0f : HEADER_FONT_SIZE + (WasExpanded ? MARGIN : 0.0f);
+	FullHeight += 2.0f * MARGIN;
 
 	CUIRect SettingsBlock;
 	pParentRect->HSplitTop(FullHeight, &SettingsBlock, pParentRect);
@@ -495,7 +484,6 @@ void CMenusSettingsControls::RenderSettingsBinds(EBindOptionGroup Group, CUIRect
 		if(SearchMatchSelected && m_SearchMatchReveal)
 		{
 			m_SearchMatchReveal = false;
-			// Scroll to reveal search match
 			CUIRect ScrollTarget;
 			Label.HMargin(-MARGIN, &ScrollTarget);
 			m_SettingsScrollRegion.AddRect(ScrollTarget, true);
@@ -507,7 +495,7 @@ void CMenusSettingsControls::RenderSettingsBinds(EBindOptionGroup Group, CUIRect
 		}
 		else if(SearchMatch != m_vSearchMatches.end())
 		{
-			LabelProps.SetColor(ColorRGBA(0.4f, 0.4f, 0.9f, 1.0f));
+			LabelProps.SetColor(ColorRGBA(0.4f, 0.4f, 1.0f, 1.0f));
 		}
 		const CLabelResult LabelResult = Ui()->DoLabel(&Label, BindOption.m_Group == EBindOptionGroup::CUSTOM ? BindOption.m_Command.c_str() : Localize(BindOption.m_pLabel),
 			FONT_SIZE, TEXTALIGN_ML, LabelProps);
@@ -529,7 +517,6 @@ void CMenusSettingsControls::RenderSettingsBinds(EBindOptionGroup Group, CUIRect
 			if(ActivateKeyReader)
 			{
 				BindOption.m_AddNewBindActivate = false;
-				// Scroll to reveal activated key reader
 				CUIRect ScrollTarget;
 				KeyReader.HMargin(-MARGIN, &ScrollTarget);
 				m_SettingsScrollRegion.AddRect(ScrollTarget, true);
@@ -585,16 +572,16 @@ void CMenusSettingsControls::RenderSettingsMouse(CUIRect View)
 
 float CMenusSettingsControls::MeasureSettingsJoystickHeight() const
 {
-	int NumOptions = 1; // expandable header
+	int NumOptions = 1;
 	if(g_Config.m_InpControllerEnable)
 	{
-		NumOptions++; // message or joystick name/selection
+		NumOptions++;
 		if(Input()->NumJoysticks() > 0)
 		{
-			NumOptions += 3; // mode, ui sens, tolerance
+			NumOptions += 3;
 			if(!g_Config.m_InpControllerAbsolute)
-				NumOptions++; // ingame sens
-			NumOptions += Input()->GetActiveJoystick()->GetNumAxes() + 1; // axis selection + header
+				NumOptions++;
+			NumOptions += Input()->GetActiveJoystick()->GetNumAxes() + 1;
 		}
 	}
 	return NumOptions * (BUTTON_HEIGHT + BUTTON_SPACING) + (NumOptions == 1 ? 0.0f : BUTTON_SPACING);
@@ -610,7 +597,7 @@ void CMenusSettingsControls::RenderSettingsJoystick(CUIRect View)
 	{
 		g_Config.m_InpControllerEnable ^= 1;
 	}
-	if(!WasJoystickEnabled) // Use old value because this was used to allocate the available height
+	if(!WasJoystickEnabled)
 	{
 		return;
 	}
@@ -618,7 +605,6 @@ void CMenusSettingsControls::RenderSettingsJoystick(CUIRect View)
 	const int NumJoysticks = Input()->NumJoysticks();
 	if(NumJoysticks > 0)
 	{
-		// show joystick device selection if more than one available or just the joystick name if there is only one
 		{
 			CUIRect JoystickDropDown;
 			View.HSplitTop(BUTTON_SPACING, nullptr, &View);
@@ -660,7 +646,7 @@ void CMenusSettingsControls::RenderSettingsJoystick(CUIRect View)
 			{0, 1},
 			g_Config.m_InpControllerAbsolute);
 
-		if(!WasAbsolute) // Use old value because this was used to allocate the available height
+		if(!WasAbsolute)
 		{
 			View.HSplitTop(BUTTON_SPACING, nullptr, &View);
 			View.HSplitTop(BUTTON_HEIGHT, &Button, &View);
@@ -730,7 +716,6 @@ void CMenusSettingsControls::RenderJoystickAxisPicker(CUIRect View)
 
 		const bool Active = g_Config.m_InpControllerX == i || g_Config.m_InpControllerY == i;
 
-		// Axis label
 		char aLabel[16];
 		str_format(aLabel, sizeof(aLabel), "%d", i + 1);
 		SLabelProperties LabelProps;
@@ -740,11 +725,9 @@ void CMenusSettingsControls::RenderJoystickAxisPicker(CUIRect View)
 		}
 		Ui()->DoLabel(&Axis, aLabel, FONT_SIZE, TEXTALIGN_MC, LabelProps);
 
-		// Axis status
 		Status.HMargin(7.0f, &Status);
 		RenderJoystickBar(&Status, (pJoystick->GetAxisValue(i) + 1.0f) / 2.0f, g_Config.m_InpControllerTolerance / 50.0f, Active);
 
-		// Bind to X/Y
 		CUIRect AimBindX, AimBindY;
 		AimBind.VSplitMid(&AimBindX, &AimBindY);
 		if(GameClient()->m_Menus.DoButton_CheckBox(&m_aaJoystickAxisCheckboxIds[i][0], "X", g_Config.m_InpControllerX == i, &AimBindX))
@@ -765,7 +748,7 @@ void CMenusSettingsControls::RenderJoystickAxisPicker(CUIRect View)
 void CMenusSettingsControls::RenderJoystickBar(const CUIRect *pRect, float Current, float Tolerance, bool Active)
 {
 	CUIRect Handle;
-	pRect->VSplitLeft(pRect->h, &Handle, nullptr); // Slider size
+	pRect->VSplitLeft(pRect->h, &Handle, nullptr);
 	Handle.x += (pRect->w - Handle.w) * Current;
 
 	pRect->Draw(ColorRGBA(1.0f, 1.0f, 1.0f, Active ? 0.25f : 0.125f), IGraphics::CORNER_ALL, pRect->h / 2.0f);

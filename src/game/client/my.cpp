@@ -8,6 +8,7 @@
 #include <cmath>
 #include <algorithm>
 #include <limits>
+#include <vector>
 #include <game/mapitems.h>
 #include <game/collision.h>
 
@@ -33,6 +34,10 @@ void CMyComponent::OnReset()
 		m_aHammerOverride[i] = false;
 		m_aHammerTarget[i] = vec2(0.0f, 0.0f);
 
+		m_aAutoLaserEnabled[i] = false;
+		m_aLaserOverride[i] = false;
+		m_aLaserTarget[i] = vec2(0.0f, 0.0f);
+
 		s_aTargetLostTicks[i] = 0;
 	}
 }
@@ -48,6 +53,9 @@ void CMyComponent::OnConsoleInit()
 
 	Console()->Register("toggle_autohammer", "", CFGFLAG_CLIENT, ConToggleAutoHammer, this, "Toggle Auto Hammer");
 	Console()->Register("+autohammer", "", CFGFLAG_CLIENT, ConKeyAutoHammer, this, "Hold Auto Hammer");
+
+	Console()->Register("toggle_autolaser", "", CFGFLAG_CLIENT, ConToggleAutoLaser, this, "Toggle Auto Laser");
+	Console()->Register("+autolaser", "", CFGFLAG_CLIENT, ConKeyAutoLaser, this, "Hold Auto Laser");
 }
 
 void CMyComponent::ConToggleSilentAim(IConsole::IResult *pResult, void *pUserData)
@@ -92,9 +100,265 @@ void CMyComponent::ConKeyAutoHammer(IConsole::IResult *pResult, void *pUserData)
 	pSelf->m_aAutoHammerEnabled[g_Config.m_ClDummy] = pResult->GetInteger(0) != 0;
 }
 
+void CMyComponent::ConToggleAutoLaser(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAutoLaserEnabled[g_Config.m_ClDummy] = !pSelf->m_aAutoLaserEnabled[g_Config.m_ClDummy];
+}
+
+void CMyComponent::ConKeyAutoLaser(IConsole::IResult *pResult, void *pUserData)
+{
+	CMyComponent *pSelf = (CMyComponent *)pUserData;
+	pSelf->m_aAutoLaserEnabled[g_Config.m_ClDummy] = pResult->GetInteger(0) != 0;
+}
+
 float CMyComponent::GetJitterAngle(int DummyIdx) const
 {
 	return 0.0f;
+}
+
+bool CMyComponent::SimulateLaser(
+	int ShooterId,
+	vec2 From,
+	vec2 Dir,
+	float Energy,
+	float BounceCost,
+	int MaxBounces,
+	int TargetId,
+	vec2 TargetPos,
+	float TargetRadius,
+	vec2 *pOutHitPos)
+{
+	vec2 CurrentPos = From;
+	vec2 CurrentDir = Dir;
+	float RemainingEnergy = Energy;
+
+	for(int Bounce = 0; Bounce <= MaxBounces; Bounce++)
+	{
+		vec2 To = CurrentPos + CurrentDir * RemainingEnergy;
+		vec2 ColTile;
+		vec2 HitPos;
+		int Res = Collision()->IntersectLineTeleWeapon(CurrentPos, To, &ColTile, &HitPos);
+		vec2 SegmentEnd = Res ? HitPos : To;
+
+		if(Bounce > 0 || ShooterId != TargetId)
+		{
+			vec2 Closest;
+			if(closest_point_on_line(CurrentPos, SegmentEnd, TargetPos, Closest))
+			{
+				if(distance(Closest, TargetPos) <= TargetRadius)
+				{
+					if(pOutHitPos)
+						*pOutHitPos = Closest;
+					return true;
+				}
+			}
+		}
+
+		if(!Res)
+			break;
+
+		vec2 TempPos = HitPos;
+		vec2 TempDir = CurrentDir * 4.0f;
+		int f = 0;
+		if(Res == -1)
+		{
+			f = Collision()->GetTile(round_to_int(ColTile.x), round_to_int(ColTile.y));
+			Collision()->SetCollisionAt(round_to_int(ColTile.x), round_to_int(ColTile.y), TILE_SOLID);
+		}
+		Collision()->MovePoint(&TempPos, &TempDir, 1.0f, nullptr);
+		if(Res == -1)
+		{
+			Collision()->SetCollisionAt(round_to_int(ColTile.x), round_to_int(ColTile.y), f);
+		}
+
+		float StepDist = distance(CurrentPos, HitPos);
+		RemainingEnergy -= (StepDist + BounceCost);
+		if(RemainingEnergy <= 0.0f)
+			break;
+
+		CurrentPos = TempPos;
+		if(length(TempDir) < 0.001f)
+			break;
+		CurrentDir = normalize(TempDir);
+	}
+
+	return false;
+}
+
+bool CMyComponent::FindLaserTrajectory(
+	int ShooterId,
+	vec2 ShooterPos,
+	int TargetId,
+	vec2 TargetPos,
+	vec2 TargetVel,
+	bool TargetOnGround,
+	int DummyIdx,
+	vec2 &OutDir)
+{
+	int TuneZone = Collision()->IsTune(Collision()->GetPureMapIndex(ShooterPos));
+	const CTuningParams *pTuning = GameClient()->GetTuning(TuneZone);
+	float LaserReach = pTuning->m_LaserReach;
+	if(LaserReach < 10.0f)
+		LaserReach = 800.0f;
+	float LaserBounceCost = pTuning->m_LaserBounceCost;
+	int LaserBounceNum = pTuning->m_LaserBounceNum;
+	float LaserBounceDelay = pTuning->m_LaserBounceDelay;
+	float Gravity = pTuning->m_Gravity;
+
+	float TicksToHit = 1.0f;
+	if(LaserBounceDelay > 0.0f)
+		TicksToHit += (LaserBounceDelay / 1000.0f) * Client()->GameTickSpeed();
+
+	vec2 PredictedTargetPos = TargetPos + TargetVel * TicksToHit;
+	if(!TargetOnGround)
+		PredictedTargetPos.y += 0.5f * Gravity * TicksToHit * TicksToHit;
+
+	if(Collision()->CheckPoint(PredictedTargetPos))
+		PredictedTargetPos = TargetPos;
+
+	vec2 AimDirCurrent = GameClient()->m_Controls.m_aMousePos[DummyIdx];
+	if(length(AimDirCurrent) < 0.001f)
+		AimDirCurrent = vec2(1.0f, 0.0f);
+	else
+		AimDirCurrent = normalize(AimDirCurrent);
+
+	if(ShooterId != TargetId)
+	{
+		vec2 DirDirect = PredictedTargetPos - ShooterPos;
+		float DistDirect = length(DirDirect);
+		if(DistDirect > 1.0f && DistDirect <= LaserReach)
+		{
+			DirDirect = normalize(DirDirect);
+			vec2 ColTile;
+			vec2 HitPos;
+			int Res = Collision()->IntersectLineTeleWeapon(ShooterPos, ShooterPos + DirDirect * DistDirect, &ColTile, &HitPos);
+			if(!Res)
+			{
+				OutDir = DirDirect;
+				return true;
+			}
+		}
+	}
+
+	std::vector<vec2> vCandidateDirs;
+	vCandidateDirs.reserve(256);
+
+	int CenterTileX = round_to_int((ShooterPos.x + PredictedTargetPos.x) * 0.5f) / 32;
+	int CenterTileY = round_to_int((ShooterPos.y + PredictedTargetPos.y) * 0.5f) / 32;
+	int Range = std::clamp(round_to_int(LaserReach / 64.0f), 6, 16);
+
+	int MinTX = std::max(0, CenterTileX - Range);
+	int MaxTX = std::min(Collision()->GetWidth() - 1, CenterTileX + Range);
+	int MinTY = std::max(0, CenterTileY - Range);
+	int MaxTY = std::min(Collision()->GetHeight() - 1, CenterTileY + Range);
+
+	for(int ty = MinTY; ty <= MaxTY; ty++)
+	{
+		for(int tx = MinTX; tx <= MaxTX; tx++)
+		{
+			int Tile = Collision()->GetTileIndex(Collision()->GetPureMapIndex(vec2(tx * 32.0f + 16.0f, ty * 32.0f + 16.0f)));
+			int FTile = Collision()->GetFrontTileIndex(Collision()->GetPureMapIndex(vec2(tx * 32.0f + 16.0f, ty * 32.0f + 16.0f)));
+			bool IsSolid = Collision()->CheckPoint(tx * 32.0f + 16.0f, ty * 32.0f + 16.0f) ||
+				Tile == TILE_SOLID || Tile == TILE_NOHOOK || FTile == TILE_SOLID || FTile == TILE_NOHOOK;
+
+			if(!IsSolid)
+				continue;
+
+			float LeftX = tx * 32.0f;
+			if(ShooterPos.x < LeftX && PredictedTargetPos.x < LeftX)
+			{
+				vec2 Mirror = vec2(2.0f * LeftX - PredictedTargetPos.x, PredictedTargetPos.y);
+				vec2 D = Mirror - ShooterPos;
+				if(length(D) > 1.0f)
+					vCandidateDirs.push_back(normalize(D));
+			}
+
+			float RightX = (tx + 1) * 32.0f;
+			if(ShooterPos.x > RightX && PredictedTargetPos.x > RightX)
+			{
+				vec2 Mirror = vec2(2.0f * RightX - PredictedTargetPos.x, PredictedTargetPos.y);
+				vec2 D = Mirror - ShooterPos;
+				if(length(D) > 1.0f)
+					vCandidateDirs.push_back(normalize(D));
+			}
+
+			float TopY = ty * 32.0f;
+			if(ShooterPos.y < TopY && PredictedTargetPos.y < TopY)
+			{
+				vec2 Mirror = vec2(PredictedTargetPos.x, 2.0f * TopY - PredictedTargetPos.y);
+				vec2 D = Mirror - ShooterPos;
+				if(length(D) > 1.0f)
+					vCandidateDirs.push_back(normalize(D));
+			}
+
+			float BottomY = (ty + 1) * 32.0f;
+			if(ShooterPos.y > BottomY && PredictedTargetPos.y > BottomY)
+			{
+				vec2 Mirror = vec2(PredictedTargetPos.x, 2.0f * BottomY - PredictedTargetPos.y);
+				vec2 D = Mirror - ShooterPos;
+				if(length(D) > 1.0f)
+					vCandidateDirs.push_back(normalize(D));
+			}
+		}
+	}
+
+	const int NUM_ANGULAR_STEPS = 180;
+	for(int s = 0; s < NUM_ANGULAR_STEPS; s++)
+	{
+		float Angle = (float)s * (2.0f * pi / (float)NUM_ANGULAR_STEPS);
+		vCandidateDirs.push_back(direction(Angle));
+	}
+
+	bool FoundBest = false;
+	float BestScore = -1e9f;
+	vec2 BestCandidateDir = vec2(0.0f, 0.0f);
+
+	for(const vec2 &TestDir : vCandidateDirs)
+	{
+		vec2 HitPoint;
+		if(SimulateLaser(ShooterId, ShooterPos, TestDir, LaserReach, LaserBounceCost, std::max(1, LaserBounceNum), TargetId, PredictedTargetPos, 24.0f, &HitPoint))
+		{
+			float DistToCenter = distance(HitPoint, PredictedTargetPos);
+			float AlignScore = dot(TestDir, AimDirCurrent);
+			float Score = (24.0f - DistToCenter) * 10.0f + AlignScore * 5.0f;
+			if(!FoundBest || Score > BestScore)
+			{
+				BestScore = Score;
+				BestCandidateDir = TestDir;
+				FoundBest = true;
+			}
+		}
+	}
+
+	if(!FoundBest)
+		return false;
+
+	float BaseAngle = angle(BestCandidateDir);
+	float StepRad = 2.0f * pi / (float)NUM_ANGULAR_STEPS;
+	for(int iter = 0; iter < 8; iter++)
+	{
+		StepRad *= 0.5f;
+		vec2 DirPlus = direction(BaseAngle + StepRad);
+		vec2 DirMinus = direction(BaseAngle - StepRad);
+		vec2 HitP, HitM, HitB;
+
+		bool OkB = SimulateLaser(ShooterId, ShooterPos, direction(BaseAngle), LaserReach, LaserBounceCost, std::max(1, LaserBounceNum), TargetId, PredictedTargetPos, 24.0f, &HitB);
+		bool OkP = SimulateLaser(ShooterId, ShooterPos, DirPlus, LaserReach, LaserBounceCost, std::max(1, LaserBounceNum), TargetId, PredictedTargetPos, 24.0f, &HitP);
+		bool OkM = SimulateLaser(ShooterId, ShooterPos, DirMinus, LaserReach, LaserBounceCost, std::max(1, LaserBounceNum), TargetId, PredictedTargetPos, 24.0f, &HitM);
+
+		float DistBase = OkB ? distance(HitB, PredictedTargetPos) : 999.0f;
+		float DistP = OkP ? distance(HitP, PredictedTargetPos) : 999.0f;
+		float DistM = OkM ? distance(HitM, PredictedTargetPos) : 999.0f;
+
+		if(DistP < DistBase && DistP <= DistM)
+			BaseAngle += StepRad;
+		else if(DistM < DistBase && DistM < DistP)
+			BaseAngle -= StepRad;
+	}
+
+	OutDir = direction(BaseAngle);
+	return true;
 }
 
 void CMyComponent::OnUpdate()
@@ -109,6 +373,7 @@ void CMyComponent::OnUpdate()
 	m_aAvoidDirection[DummyIdx] = 0;
 	m_aAvoidActive[DummyIdx] = false;
 	m_aHammerOverride[DummyIdx] = false;
+	m_aLaserOverride[DummyIdx] = false;
 
 	if(m_aAvoidEnabled[DummyIdx])
 	{
@@ -273,6 +538,50 @@ void CMyComponent::OnUpdate()
 							Dir = vec2(1.0f, 0.0f);
 						m_aHammerTarget[DummyIdx] = normalize(Dir) * 100.0f;
 						break;
+					}
+				}
+			}
+		}
+	}
+
+	if(m_aAutoLaserEnabled[DummyIdx])
+	{
+		int LocalId = GameClient()->m_Snap.m_LocalClientId;
+		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
+		{
+			CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
+			if(pLocalChar && pLocalChar->GetWeaponGot(WEAPON_LASER))
+			{
+				if(pLocalChar->GetActiveWeapon() != WEAPON_LASER)
+				{
+					GameClient()->m_Controls.m_aInputData[DummyIdx].m_WantedWeapon = WEAPON_LASER + 1;
+				}
+
+				int TargetId = LocalId;
+				if(DummyIdx == 1 && GameClient()->m_aLocalIds[0] >= 0)
+				{
+					TargetId = GameClient()->m_aLocalIds[0];
+				}
+
+				CCharacter *pTargetChar = GameClient()->m_GameWorld.GetCharacterById(TargetId);
+				if(pTargetChar)
+				{
+					vec2 ShooterPos = GameClient()->m_aClients[LocalId].m_Predicted.m_Pos;
+					if(length(ShooterPos) < 1.0f)
+						ShooterPos = GameClient()->m_aClients[LocalId].m_RenderPos;
+
+					vec2 TargetPos = GameClient()->m_aClients[TargetId].m_Predicted.m_Pos;
+					if(length(TargetPos) < 1.0f)
+						TargetPos = GameClient()->m_aClients[TargetId].m_RenderPos;
+
+					vec2 TargetVel = GameClient()->m_aClients[TargetId].m_Predicted.m_Vel;
+					bool TargetOnGround = Collision()->IsOnGround(TargetPos, 28.0f);
+
+					vec2 BestDir;
+					if(FindLaserTrajectory(LocalId, ShooterPos, TargetId, TargetPos, TargetVel, TargetOnGround, DummyIdx, BestDir))
+					{
+						m_aLaserOverride[DummyIdx] = true;
+						m_aLaserTarget[DummyIdx] = normalize(BestDir) * 100.0f;
 					}
 				}
 			}
@@ -557,6 +866,13 @@ void CMyComponent::OnRender()
 	{
 		TextRender()->TextColor(1.0f, 0.5f, 0.0f, 1.0f);
 		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AUTO HAMMER: ACTIVE");
+		DisplayY += 10.0f;
+	}
+
+	if(m_aAutoLaserEnabled[DummyIdx])
+	{
+		TextRender()->TextColor(0.0f, 0.8f, 1.0f, 1.0f);
+		TextRender()->Text(Width - 110.0f, DisplayY, 8.0f, "AUTO LASER: ACTIVE");
 		DisplayY += 10.0f;
 	}
 
