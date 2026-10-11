@@ -283,8 +283,6 @@ int CControls::SnapInput(int *pData)
 		if(GameClient()->m_MyComponent.IsAvoidActive(DummyIdx))
 		{
 			m_aInputData[DummyIdx].m_Direction = GameClient()->m_MyComponent.GetAvoidDirection(DummyIdx);
-			m_aInputDirectionLeft[DummyIdx] = 0;
-			m_aInputDirectionRight[DummyIdx] = 0;
 			m_aInputData[DummyIdx].m_Jump = 0;
 		}
 

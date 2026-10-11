@@ -395,71 +395,126 @@ void CMyComponent::OnUpdate()
 
 			if(m_aAvoidTargetDirection[DummyIdx] != 0)
 			{
-				if(CurrentInput.m_Direction != m_aAvoidTargetDirection[DummyIdx] || CurrentInput.m_Jump != 0 || !OnGround)
+				if(CurrentInput.m_Direction != m_aAvoidTargetDirection[DummyIdx])
 				{
 					m_aAvoidTargetDirection[DummyIdx] = 0;
 				}
 			}
 
-			if(OnGround && CurrentInput.m_Jump == 0 && CurrentInput.m_Direction != 0)
+			if(CurrentInput.m_Direction != 0)
 			{
-				auto IsDanger = [&](vec2 Pos) {
-					float r = 14.0f;
-					vec2 CheckPoints[4] = {
-						Pos + vec2(-r, -r),
-						Pos + vec2(r, -r),
-						Pos + vec2(-r, r),
-						Pos + vec2(r, r)
+				auto IsTileFreeze = [&](int Index) {
+					if(Index < 0) return false;
+					int Tile = Collision()->GetTileIndex(Index);
+					int FTile = Collision()->GetFrontTileIndex(Index);
+					int Switch = Collision()->GetSwitchType(Index);
+					return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE ||
+					       FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE ||
+					       Switch == TILE_FREEZE || Switch == TILE_DFREEZE || Switch == TILE_LFREEZE;
+				};
+
+				auto IsTileDeath = [&](int Index) {
+					if(Index < 0) return false;
+					int Tile = Collision()->GetTileIndex(Index);
+					int FTile = Collision()->GetFrontTileIndex(Index);
+					int Switch = Collision()->GetSwitchType(Index);
+					return Tile == TILE_DEATH || FTile == TILE_DEATH || Switch == TILE_DEATH;
+				};
+
+				auto IsDangerPos = [&](vec2 Pos) {
+					int Index = Collision()->GetPureMapIndex(Pos);
+					if(IsTileFreeze(Index))
+						return true;
+
+					const float rDeath = 28.0f / 3.0f;
+					const vec2 aCheckPoints[5] = {
+						Pos,
+						Pos + vec2(-rDeath, -rDeath),
+						Pos + vec2(rDeath, -rDeath),
+						Pos + vec2(-rDeath, rDeath),
+						Pos + vec2(rDeath, rDeath)
 					};
-					for(auto p : CheckPoints) {
-						int Index = Collision()->GetPureMapIndex(p);
-						int Tile = Collision()->GetTileIndex(Index);
-						int FTile = Collision()->GetFrontTileIndex(Index);
-						if(Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE || Tile == TILE_DEATH ||
-						   FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE || FTile == TILE_DEATH)
+					for(const auto &p : aCheckPoints)
+					{
+						if(IsTileDeath(Collision()->GetPureMapIndex(p)))
 							return true;
 					}
 					return false;
 				};
 
+				auto IsDangerSegment = [&](vec2 From, vec2 To) {
+					if(IsDangerPos(To))
+						return true;
+					std::vector<int> vIndices = Collision()->GetMapIndices(From, To);
+					for(int Idx : vIndices)
+					{
+						if(IsTileFreeze(Idx) || IsTileDeath(Idx))
+							return true;
+					}
+					return false;
+				};
+
+				int CurrentZone = Collision()->IsTune(Collision()->GetPureMapIndex(StartCore.m_Pos));
+				const CTuningParams *pTuning = GameClient()->GetTuning(CurrentZone);
+
 				CWorldCore TempWorld;
 				CCharacterCore TempCore;
 				TempCore.Init(&TempWorld, Collision());
 
-				if(m_aAvoidTargetDirection[DummyIdx] == 0)
-				{
-					bool PathCDanger = false;
-					CCharacterCore CoreC = StartCore;
-					CoreC.Init(&TempWorld, Collision());
-					for(int i = 0; i < 60; i++)
-					{
-						CoreC.m_Input = CurrentInput;
-						CoreC.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
-						CoreC.Move();
-						CoreC.Quantize();
-						if(IsDanger(CoreC.m_Pos)) { PathCDanger = true; break; }
-					}
+				int SimTicks = (OnGround && std::abs(StartCore.m_Vel.y) < 0.1f) ? 60 : 90;
 
-					if(PathCDanger)
+				bool PathCDanger = false;
+				CCharacterCore CoreC = StartCore;
+				CoreC.Init(&TempWorld, Collision());
+				CoreC.m_Tuning = *pTuning;
+				for(int i = 0; i < SimTicks; i++)
+				{
+					vec2 StepFrom = CoreC.m_Pos;
+					CoreC.m_Input = CurrentInput;
+					CoreC.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+					CoreC.Move();
+					CoreC.Quantize();
+					if(IsDangerSegment(StepFrom, CoreC.m_Pos))
+					{
+						PathCDanger = true;
+						break;
+					}
+				}
+
+				if(!PathCDanger)
+				{
+					m_aAvoidTargetDirection[DummyIdx] = 0;
+				}
+				else
+				{
+					if(m_aAvoidTargetDirection[DummyIdx] == 0)
 					{
 						bool PathBDanger = false;
 						CCharacterCore CoreB = StartCore;
 						CoreB.Init(&TempWorld, Collision());
-						for(int i = 0; i < 60; i++)
+						CoreB.m_Tuning = *pTuning;
+						for(int i = 0; i < SimTicks; i++)
 						{
+							vec2 StepFrom = CoreB.m_Pos;
 							CoreB.m_Input = CurrentInput;
 							if(i > 0)
 							{
 								int BrakeDir = 0;
-								if(CoreB.m_Vel.x > 0.1f) BrakeDir = -1;
-								else if(CoreB.m_Vel.x < -0.1f) BrakeDir = 1;
+								if(CoreB.m_Vel.x * CurrentInput.m_Direction > 0.1f)
+									BrakeDir = -CurrentInput.m_Direction;
 								CoreB.m_Input.m_Direction = BrakeDir;
+								CoreB.m_Input.m_Jump = 0;
 							}
 							CoreB.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
 							CoreB.Move();
 							CoreB.Quantize();
-							if(IsDanger(CoreB.m_Pos)) { PathBDanger = true; break; }
-							if(std::abs(CoreB.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreB.m_Pos, 28.0f)) break;
+							if(IsDangerSegment(StepFrom, CoreB.m_Pos))
+							{
+								PathBDanger = true;
+								break;
+							}
+							if(std::abs(CoreB.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreB.m_Pos, 28.0f))
+								break;
 						}
 
 						if(PathBDanger)
@@ -467,18 +522,26 @@ void CMyComponent::OnUpdate()
 							bool PathADanger = false;
 							CCharacterCore CoreA = StartCore;
 							CoreA.Init(&TempWorld, Collision());
-							for(int i = 0; i < 60; i++)
+							CoreA.m_Tuning = *pTuning;
+							for(int i = 0; i < SimTicks; i++)
 							{
+								vec2 StepFrom = CoreA.m_Pos;
 								int BrakeDir = 0;
-								if(CoreA.m_Vel.x > 0.1f) BrakeDir = -1;
-								else if(CoreA.m_Vel.x < -0.1f) BrakeDir = 1;
+								if(CoreA.m_Vel.x * CurrentInput.m_Direction > 0.1f)
+									BrakeDir = -CurrentInput.m_Direction;
 								CoreA.m_Input = CurrentInput;
 								CoreA.m_Input.m_Direction = BrakeDir;
+								CoreA.m_Input.m_Jump = 0;
 								CoreA.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
 								CoreA.Move();
 								CoreA.Quantize();
-								if(IsDanger(CoreA.m_Pos)) { PathADanger = true; break; }
-								if(std::abs(CoreA.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreA.m_Pos, 28.0f)) break;
+								if(IsDangerSegment(StepFrom, CoreA.m_Pos))
+								{
+									PathADanger = true;
+									break;
+								}
+								if(std::abs(CoreA.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreA.m_Pos, 28.0f))
+									break;
 							}
 
 							if(!PathADanger)
@@ -491,9 +554,10 @@ void CMyComponent::OnUpdate()
 
 				if(m_aAvoidTargetDirection[DummyIdx] != 0)
 				{
+					int TargetDir = m_aAvoidTargetDirection[DummyIdx];
 					int BrakeDir = 0;
-					if(StartCore.m_Vel.x > 0.1f) BrakeDir = -1;
-					else if(StartCore.m_Vel.x < -0.1f) BrakeDir = 1;
+					if(StartCore.m_Vel.x * TargetDir > 0.1f)
+						BrakeDir = -TargetDir;
 
 					m_aAvoidActive[DummyIdx] = true;
 					m_aAvoidDirection[DummyIdx] = BrakeDir;
