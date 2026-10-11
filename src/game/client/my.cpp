@@ -391,17 +391,21 @@ void CMyComponent::OnUpdate()
 
 			CurrentInput.m_Direction = InputDir;
 
-			bool OnGround = Collision()->IsOnGround(StartCore.m_Pos, 28.0f);
+			int MoveDir = CurrentInput.m_Direction;
+			if(MoveDir == 0 && std::abs(StartCore.m_Vel.x) > 0.5f)
+			{
+				MoveDir = StartCore.m_Vel.x > 0.0f ? 1 : -1;
+			}
 
 			if(m_aAvoidTargetDirection[DummyIdx] != 0)
 			{
-				if(CurrentInput.m_Direction != m_aAvoidTargetDirection[DummyIdx])
+				if(CurrentInput.m_Direction != 0 && CurrentInput.m_Direction != m_aAvoidTargetDirection[DummyIdx])
 				{
 					m_aAvoidTargetDirection[DummyIdx] = 0;
 				}
 			}
 
-			if(CurrentInput.m_Direction != 0)
+			if(MoveDir != 0)
 			{
 				auto IsTileFreeze = [&](int Index) {
 					if(Index < 0) return false;
@@ -421,9 +425,13 @@ void CMyComponent::OnUpdate()
 					return Tile == TILE_DEATH || FTile == TILE_DEATH || Switch == TILE_DEATH;
 				};
 
-				auto IsDangerPos = [&](vec2 Pos) {
+				auto IsDangerPos = [&](vec2 Pos, int Direction) {
 					int Index = Collision()->GetPureMapIndex(Pos);
 					if(IsTileFreeze(Index))
+						return true;
+
+					int ProbeIndex = Collision()->GetPureMapIndex(Pos + vec2((float)Direction * 1.0f, 0.0f));
+					if(IsTileFreeze(ProbeIndex))
 						return true;
 
 					const float rDeath = 28.0f / 3.0f;
@@ -436,14 +444,15 @@ void CMyComponent::OnUpdate()
 					};
 					for(const auto &p : aCheckPoints)
 					{
-						if(IsTileDeath(Collision()->GetPureMapIndex(p)))
+						int DeathIndex = Collision()->GetPureMapIndex(p);
+						if(IsTileDeath(DeathIndex))
 							return true;
 					}
 					return false;
 				};
 
-				auto IsDangerSegment = [&](vec2 From, vec2 To) {
-					if(IsDangerPos(To))
+				auto IsDangerSegment = [&](vec2 From, vec2 To, int Direction) {
+					if(IsDangerPos(To, Direction))
 						return true;
 					std::vector<int> vIndices = Collision()->GetMapIndices(From, To);
 					for(int Idx : vIndices)
@@ -461,20 +470,24 @@ void CMyComponent::OnUpdate()
 				CCharacterCore TempCore;
 				TempCore.Init(&TempWorld, Collision());
 
+				bool OnGround = Collision()->IsOnGround(StartCore.m_Pos, 28.0f);
 				int SimTicks = (OnGround && std::abs(StartCore.m_Vel.y) < 0.1f) ? 60 : 90;
 
 				bool PathCDanger = false;
 				CCharacterCore CoreC = StartCore;
 				CoreC.Init(&TempWorld, Collision());
 				CoreC.m_Tuning = *pTuning;
+				CNetObj_PlayerInput SimInputC = CurrentInput;
+				SimInputC.m_Direction = MoveDir;
+
 				for(int i = 0; i < SimTicks; i++)
 				{
 					vec2 StepFrom = CoreC.m_Pos;
-					CoreC.m_Input = CurrentInput;
+					CoreC.m_Input = SimInputC;
 					CoreC.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
 					CoreC.Move();
 					CoreC.Quantize();
-					if(IsDangerSegment(StepFrom, CoreC.m_Pos))
+					if(IsDangerSegment(StepFrom, CoreC.m_Pos, MoveDir))
 					{
 						PathCDanger = true;
 						break;
@@ -493,61 +506,45 @@ void CMyComponent::OnUpdate()
 						CCharacterCore CoreB = StartCore;
 						CoreB.Init(&TempWorld, Collision());
 						CoreB.m_Tuning = *pTuning;
-						for(int i = 0; i < SimTicks; i++)
+
+						vec2 PrevPos = CoreB.m_Pos;
+						CoreB.m_Input = SimInputC;
+						CoreB.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+						CoreB.Move();
+						CoreB.Quantize();
+
+						if(IsDangerSegment(PrevPos, CoreB.m_Pos, MoveDir))
 						{
-							vec2 StepFrom = CoreB.m_Pos;
-							CoreB.m_Input = CurrentInput;
-							if(i > 0)
+							PathBDanger = true;
+						}
+						else
+						{
+							for(int i = 1; i < SimTicks; i++)
 							{
-								int BrakeDir = 0;
-								if(CoreB.m_Vel.x * CurrentInput.m_Direction > 0.1f)
-									BrakeDir = -CurrentInput.m_Direction;
-								CoreB.m_Input.m_Direction = BrakeDir;
+								PrevPos = CoreB.m_Pos;
+								CoreB.m_Input.m_Direction = -MoveDir;
 								CoreB.m_Input.m_Jump = 0;
+								CoreB.m_Input.m_Hook = 0;
+								CoreB.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+								CoreB.Move();
+								CoreB.Quantize();
+
+								if(IsDangerSegment(PrevPos, CoreB.m_Pos, MoveDir))
+								{
+									PathBDanger = true;
+									break;
+								}
+
+								if(CoreB.m_Vel.x * (float)MoveDir <= 0.1f)
+								{
+									break;
+								}
 							}
-							CoreB.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
-							CoreB.Move();
-							CoreB.Quantize();
-							if(IsDangerSegment(StepFrom, CoreB.m_Pos))
-							{
-								PathBDanger = true;
-								break;
-							}
-							if(std::abs(CoreB.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreB.m_Pos, 28.0f))
-								break;
 						}
 
 						if(PathBDanger)
 						{
-							bool PathADanger = false;
-							CCharacterCore CoreA = StartCore;
-							CoreA.Init(&TempWorld, Collision());
-							CoreA.m_Tuning = *pTuning;
-							for(int i = 0; i < SimTicks; i++)
-							{
-								vec2 StepFrom = CoreA.m_Pos;
-								int BrakeDir = 0;
-								if(CoreA.m_Vel.x * CurrentInput.m_Direction > 0.1f)
-									BrakeDir = -CurrentInput.m_Direction;
-								CoreA.m_Input = CurrentInput;
-								CoreA.m_Input.m_Direction = BrakeDir;
-								CoreA.m_Input.m_Jump = 0;
-								CoreA.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
-								CoreA.Move();
-								CoreA.Quantize();
-								if(IsDangerSegment(StepFrom, CoreA.m_Pos))
-								{
-									PathADanger = true;
-									break;
-								}
-								if(std::abs(CoreA.m_Vel.x) < 0.1f && Collision()->IsOnGround(CoreA.m_Pos, 28.0f))
-									break;
-							}
-
-							if(!PathADanger)
-							{
-								m_aAvoidTargetDirection[DummyIdx] = CurrentInput.m_Direction;
-							}
+							m_aAvoidTargetDirection[DummyIdx] = MoveDir;
 						}
 					}
 				}
@@ -556,7 +553,7 @@ void CMyComponent::OnUpdate()
 				{
 					int TargetDir = m_aAvoidTargetDirection[DummyIdx];
 					int BrakeDir = 0;
-					if(StartCore.m_Vel.x * TargetDir > 0.1f)
+					if(StartCore.m_Vel.x * (float)TargetDir > 0.1f)
 						BrakeDir = -TargetDir;
 
 					m_aAvoidActive[DummyIdx] = true;
@@ -742,9 +739,7 @@ void CMyComponent::OnUpdate()
 			BestAimDir = normalize(TargetPos - LocalPos);
 		}
 		else if(FutureDist > 0.001f)
-		{
 			BestAimDir = normalize(ToFutureTarget);
-		}
 	}
 	else
 	{
