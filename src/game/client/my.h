@@ -54,6 +54,8 @@ private:
 	static void ConToggleAutoLaser(IConsole::IResult *pResult, void *pUserData);
 	static void ConKeyAutoLaser(IConsole::IResult *pResult, void *pUserData);
 
+	bool IsTargetApproachingFreeze(int TargetId) const;
+
 	bool SimulateLaser(
 		int ShooterId,
 		vec2 From,

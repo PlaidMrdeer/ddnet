@@ -117,6 +117,85 @@ float CMyComponent::GetJitterAngle(int DummyIdx) const
 	return 0.0f;
 }
 
+bool CMyComponent::IsTargetApproachingFreeze(int TargetId) const
+{
+	if(TargetId < 0 || TargetId >= MAX_CLIENTS)
+		return false;
+
+	CCharacter *pTargetChar = GameClient()->m_GameWorld.GetCharacterById(TargetId);
+	if(!pTargetChar || !GameClient()->m_aClients[TargetId].m_Active || !GameClient()->m_Snap.m_aCharacters[TargetId].m_Active)
+		return false;
+
+	if(pTargetChar->m_FreezeTime > 0 || pTargetChar->Core()->m_FreezeEnd != 0 || pTargetChar->Core()->m_IsInFreeze || pTargetChar->Core()->m_DeepFrozen || pTargetChar->Core()->m_LiveFrozen)
+		return true;
+
+	auto IsTileFreeze = [this](int Index) {
+		if(Index < 0)
+			return false;
+		int Tile = Collision()->GetTileIndex(Index);
+		int FTile = Collision()->GetFrontTileIndex(Index);
+		int Switch = Collision()->GetSwitchType(Index);
+		return Tile == TILE_FREEZE || Tile == TILE_DFREEZE || Tile == TILE_LFREEZE ||
+		       FTile == TILE_FREEZE || FTile == TILE_DFREEZE || FTile == TILE_LFREEZE ||
+		       Switch == TILE_FREEZE || Switch == TILE_DFREEZE || Switch == TILE_LFREEZE;
+	};
+
+	vec2 TargetPos = GameClient()->m_aClients[TargetId].m_Predicted.m_Pos;
+	if(length(TargetPos) < 1.0f)
+		TargetPos = GameClient()->m_aClients[TargetId].m_RenderPos;
+
+	if(IsTileFreeze(Collision()->GetPureMapIndex(TargetPos)))
+		return true;
+
+	const float Radius = 14.0f;
+	const vec2 aOffsets[4] = {vec2(-Radius, 0.0f), vec2(Radius, 0.0f), vec2(0.0f, -Radius), vec2(0.0f, Radius)};
+	for(const auto &Offset : aOffsets)
+	{
+		if(IsTileFreeze(Collision()->GetPureMapIndex(TargetPos + Offset)))
+			return true;
+	}
+
+	CCharacterCore SimCore = GameClient()->m_aClients[TargetId].m_Predicted;
+	int CurrentZone = Collision()->IsTune(Collision()->GetPureMapIndex(SimCore.m_Pos));
+	const CTuningParams *pTuning = GameClient()->GetTuning(CurrentZone);
+
+	CWorldCore TempWorld;
+	SimCore.Init(&TempWorld, Collision());
+	SimCore.m_Tuning = *pTuning;
+
+	CNetObj_PlayerInput SimInput;
+	mem_zero(&SimInput, sizeof(SimInput));
+	SimInput.m_Direction = SimCore.m_Direction;
+
+	const int SIM_TICKS = 30;
+	for(int i = 0; i < SIM_TICKS; i++)
+	{
+		vec2 StepFrom = SimCore.m_Pos;
+		SimCore.m_Input = SimInput;
+		SimCore.Tick(true, !GameClient()->m_GameWorld.m_WorldConfig.m_NoWeakHookAndBounce);
+		SimCore.Move();
+		SimCore.Quantize();
+
+		std::vector<int> vIndices = Collision()->GetMapIndices(StepFrom, SimCore.m_Pos);
+		for(int Idx : vIndices)
+		{
+			if(IsTileFreeze(Idx))
+				return true;
+		}
+
+		if(IsTileFreeze(Collision()->GetPureMapIndex(SimCore.m_Pos)))
+			return true;
+
+		for(const auto &Offset : aOffsets)
+		{
+			if(IsTileFreeze(Collision()->GetPureMapIndex(SimCore.m_Pos + Offset)))
+				return true;
+		}
+	}
+
+	return false;
+}
+
 bool CMyComponent::SimulateLaser(
 	int ShooterId,
 	vec2 From,
@@ -610,39 +689,42 @@ void CMyComponent::OnUpdate()
 		int LocalId = GameClient()->m_Snap.m_LocalClientId;
 		if(LocalId >= 0 && GameClient()->m_Snap.m_aCharacters[LocalId].m_Active)
 		{
-			CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
-			if(pLocalChar && pLocalChar->GetWeaponGot(WEAPON_LASER))
+			int TargetId = LocalId;
+			if(DummyIdx == 1 && GameClient()->m_aLocalIds[0] >= 0)
 			{
-				if(pLocalChar->GetActiveWeapon() != WEAPON_LASER)
+				TargetId = GameClient()->m_aLocalIds[0];
+			}
+
+			if(IsTargetApproachingFreeze(TargetId))
+			{
+				CCharacter *pLocalChar = GameClient()->m_GameWorld.GetCharacterById(LocalId);
+				if(pLocalChar && pLocalChar->GetWeaponGot(WEAPON_LASER))
 				{
-					GameClient()->m_Controls.m_aInputData[DummyIdx].m_WantedWeapon = WEAPON_LASER + 1;
-				}
-
-				int TargetId = LocalId;
-				if(DummyIdx == 1 && GameClient()->m_aLocalIds[0] >= 0)
-				{
-					TargetId = GameClient()->m_aLocalIds[0];
-				}
-
-				CCharacter *pTargetChar = GameClient()->m_GameWorld.GetCharacterById(TargetId);
-				if(pTargetChar)
-				{
-					vec2 ShooterPos = GameClient()->m_aClients[LocalId].m_Predicted.m_Pos;
-					if(length(ShooterPos) < 1.0f)
-						ShooterPos = GameClient()->m_aClients[LocalId].m_RenderPos;
-
-					vec2 TargetPos = GameClient()->m_aClients[TargetId].m_Predicted.m_Pos;
-					if(length(TargetPos) < 1.0f)
-						TargetPos = GameClient()->m_aClients[TargetId].m_RenderPos;
-
-					vec2 TargetVel = GameClient()->m_aClients[TargetId].m_Predicted.m_Vel;
-					bool TargetOnGround = Collision()->IsOnGround(TargetPos, 28.0f);
-
-					vec2 BestDir;
-					if(FindLaserTrajectory(LocalId, ShooterPos, TargetId, TargetPos, TargetVel, TargetOnGround, DummyIdx, BestDir))
+					if(pLocalChar->GetActiveWeapon() != WEAPON_LASER)
 					{
-						m_aLaserOverride[DummyIdx] = true;
-						m_aLaserTarget[DummyIdx] = normalize(BestDir) * 100.0f;
+						GameClient()->m_Controls.m_aInputData[DummyIdx].m_WantedWeapon = WEAPON_LASER + 1;
+					}
+
+					CCharacter *pTargetChar = GameClient()->m_GameWorld.GetCharacterById(TargetId);
+					if(pTargetChar)
+					{
+						vec2 ShooterPos = GameClient()->m_aClients[LocalId].m_Predicted.m_Pos;
+						if(length(ShooterPos) < 1.0f)
+							ShooterPos = GameClient()->m_aClients[LocalId].m_RenderPos;
+
+						vec2 TargetPos = GameClient()->m_aClients[TargetId].m_Predicted.m_Pos;
+						if(length(TargetPos) < 1.0f)
+							TargetPos = GameClient()->m_aClients[TargetId].m_RenderPos;
+
+						vec2 TargetVel = GameClient()->m_aClients[TargetId].m_Predicted.m_Vel;
+						bool TargetOnGround = Collision()->IsOnGround(TargetPos, 28.0f);
+
+						vec2 BestDir;
+						if(FindLaserTrajectory(LocalId, ShooterPos, TargetId, TargetPos, TargetVel, TargetOnGround, DummyIdx, BestDir))
+						{
+							m_aLaserOverride[DummyIdx] = true;
+							m_aLaserTarget[DummyIdx] = normalize(BestDir) * 100.0f;
+						}
 					}
 				}
 			}
